@@ -1,0 +1,22 @@
+# Keep secrets and local state out of the build context (and therefore out of the image).
+.env
+.env.*
+!.env.example
+.neon
+private/
+
+# Rebuilt inside the image.
+node_modules/
+.next/
+.mastra/
+*.tsbuildinfo
+next-env.d.ts
+
+# Not needed at runtime (and large).
+.git/
+.gitignore
+.claude/
+video/
+docs/
+*.log
+.DS_Store

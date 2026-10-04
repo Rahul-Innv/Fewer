@@ -1,0 +1,126 @@
+import type { Verdict } from "@/core/contracts";
+
+/** JSON shape of GET /api/desk. Type-only module: safe to import from client components. */
+
+export type FitLine = {
+  journeyId: string;
+  title: string;
+  rank: number | null;
+  /** What the model suggested. */
+  score: 0 | 1 | 2 | 3;
+  /** What the rules used after learned dislikes (only set when it differs). */
+  effective?: 0 | 1 | 2 | 3;
+  reason: string;
+};
+
+export type EvidenceChipData = {
+  domain: string;
+  verified: boolean;
+  claim: string;
+};
+
+export type DraftView = {
+  id: string;
+  to: string;
+  kind: string;
+  body: string;
+};
+
+export type CardStatus = "awaiting" | "sent" | "held" | "blocked" | "working" | "error";
+
+export type OutcomeView = {
+  rating: number;
+  note: string | null;
+  result: string | null;
+  at: string;
+};
+
+export type AskCardData = {
+  id: string;
+  title: string;
+  from: string;
+  fromName: string | null;
+  subject: string;
+  receivedAt: string;
+  kind: string | null;
+  tag: string | null;
+  startsAt: string | null;
+  durationMin: number | null;
+  inPerson: boolean | null;
+  verdict: Verdict | null;
+  rule: string | null;
+  reasons: string[];
+  question: string | null;
+  smallerOffer: string | null;
+  costHours: number | null;
+  pushesOut: string | null;
+  fits: FitLine[];
+  evidence: EvidenceChipData[];
+  verifiedClaims: number;
+  draft: DraftView | null;
+  status: CardStatus;
+  statusLabel: string;
+  sentAt: string | null;
+  checkinSent: boolean;
+  outcome: OutcomeView | null;
+};
+
+export type JourneyView = { id: string; rank: number; title: string };
+export type BoundaryView = { id: string; strength: string; label: string };
+
+export type LedgerView = {
+  yes: number;
+  wildcard: number;
+  smaller: number;
+  no: number;
+  askOne: number;
+  blocked: number;
+  hoursProtected: number;
+};
+
+export type PendingApprovalView = {
+  id: string;
+  code: string;
+  expiresAt: string | null;
+  createdAt: string;
+  drafts: { id: string; to: string; kind: string; askTitle: string; body: string }[];
+};
+
+/**
+ * JSON shape of POST /api/approve: approveByCode's result, or an API error body.
+ * `reason` is one of approveByCode's exact strings (see refusalCopy in ApprovalBanner.tsx) or "sent N" / "sent N, M failed".
+ */
+export type ApproveResponse = { ok: boolean; reason?: string; sent?: number; error?: string };
+
+/** JSON shape of POST /api/decline. */
+export type DeclineResponse = { ok: boolean; error?: string };
+
+export type OutcomeRowView = {
+  id: number;
+  askTitle: string;
+  tag: string | null;
+  rating: number;
+  result: string | null;
+  note: string | null;
+  at: string;
+};
+
+export type DeskData = {
+  /** false when DATABASE_URL is missing. */
+  configured: boolean;
+  /** Friendly message when the DB could not be read. Never contains secrets. */
+  error: string | null;
+  now: string;
+  inbox: string | null;
+  approver: string | null;
+  ownerName: string;
+  timeZone: string;
+  journeys: JourneyView[];
+  boundaries: BoundaryView[];
+  ledger: LedgerView;
+  pending: PendingApprovalView | null;
+  asks: AskCardData[];
+  outcomes: OutcomeRowView[];
+  /** Count of check-ins sent so far (the demo time-skip or real ones). */
+  checkinsSent: number;
+};

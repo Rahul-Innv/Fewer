@@ -1,0 +1,6 @@
+1. Open Studio: one-time `npm i @mastra/observability && npm i -D mastra`, then `npm run studio` (= `mastra dev --dir src/mastra`, DATABASE_URL from .env.local) and open http://localhost:4111 (agents: fewer-parser, fewer-drafter, fewer).
+2. Traces appear in Studio > Observability > Traces: every parseAsk/draftReply call from the worker or the Desk lands as "fewer: parse ask" then "fewer: draft reply" (metadata askId, tags parse/draft), via the shared Postgres; runs started in Studio's Agents tab show up there too. `FEWER_TRACING=off` disables it.
+3. Mastra Platform traces: set MASTRA_PLATFORM_ACCESS_TOKEN and MASTRA_PROJECT_ID (create both in a project at https://projects.mastra.ai) and restart the worker/Next/Studio; the platform exporter is only added when the token is set. The owner redeems code AGENTHACK there for $25 credits. Traces include email text, so use demo data only.
+4. Prerequisite for any trace: src/mastra/factory.ts loads @mastra/observability at runtime; if it is not installed Fewer logs "tracing off" and runs untraced.
+5. Video (5 s): push one demo ask through the worker, open Traces, click "fewer: parse ask" (email in, structured JSON out, haiku model span), then "fewer: draft reply" (sonnet model span, reply text out).
+6. Model calls fail with "AI Gateway credits required" until the Neon gateway is funded, so film a run that succeeds.
