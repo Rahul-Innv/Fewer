@@ -181,16 +181,19 @@ function VerdictCardImpl({
   timeZone,
   isNew,
   change,
+  defaultExpanded,
 }: {
   card: AskCardData;
   timeZone: string;
   isNew: boolean;
   /** Set briefly after a goal reorder changed this verdict. */
   change?: VerdictChange;
+  /** Open with details showing (for example inside the calendar's detail panel). */
+  defaultExpanded?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   // Collapsed by default: verdict word, why, title. Details holds stages, reasons, evidence and the draft.
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded ?? false);
   const detailsId = useId();
   // Was a verdict already on this card when it first rendered? Decides when the landing animation waits for card-in.
   const [hadVerdictAtMount] = useState(card.verdict !== null);

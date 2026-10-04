@@ -11,16 +11,17 @@ import { AgendaList } from "./Agenda";
 import { ProactivePanel } from "./ProactivePanel";
 import { AskComposer } from "./AskComposer";
 import { AgentNow } from "./AgentNow";
+import { SHOW_WEEK, WeekView } from "./WeekView";
 import { LiveControls, ResetDemoButton } from "./Controls";
 import { DemoBadge, DemoSteps, InboxLine, RunDemoButton, StatTiles } from "./Overview";
 import { LogoMark } from "./LogoMark";
 import { EmailPlanButton, GoalOrder, Toast, type VerdictChange } from "./Actions";
-import { ChatDrawer } from "../chat/ChatDrawer";
+import { ChatDrawer, ChatLauncher } from "../chat/ChatDrawer";
 import { clockTime, plural, savedHoursForSmaller } from "./format";
 
 const POLL_MS = 2500;
 
-const SECTIONS = ["plan", "goals", "activity"] as const;
+const SECTIONS = ["plan", "week", "goals", "activity"] as const;
 type Scope = "live" | "demo";
 type Section = (typeof SECTIONS)[number];
 
@@ -353,6 +354,7 @@ export function Desk({ initialInbox, ownerName }: { initialInbox: string | null;
   };
   const NAV: { id: Section; label: string }[] = [
     { id: "plan", label: "Plan" },
+    ...(SHOW_WEEK ? [{ id: "week" as const, label: "Week" }] : []),
     { id: "goals", label: "Goals" },
     { id: "activity", label: "Activity" },
   ];
@@ -378,7 +380,7 @@ export function Desk({ initialInbox, ownerName }: { initialInbox: string | null;
   const scopePending = isDemoScope ? (desk?.pendingDemo ?? null) : (desk?.pending ?? null);
 
   return (
-    <div className="mx-auto w-full max-w-[1200px] flex-1 px-4 pb-10 pt-3 sm:px-6">
+    <div className="mx-auto w-full max-w-[1200px] flex-1 px-4 pb-28 pt-3 sm:px-6">
       {/* ---------- header: logo, what Fewer is doing, the two always-there actions ---------- */}
       <header className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
@@ -548,6 +550,12 @@ export function Desk({ initialInbox, ownerName }: { initialInbox: string | null;
       </section>
 
       {/* ---------- ACTIVITY: what happened, follow-ups, proactive check ---------- */}
+      {SHOW_WEEK ? (
+        <section role="tabpanel" id="section-week" aria-labelledby="nav-week" hidden={view !== "week"} className="pt-4">
+          {view === "week" ? <WeekView asks={scopeAsks} timeZone={tz} commitments={desk?.commitments ?? null} /> : null}
+        </section>
+      ) : null}
+
       <section role="tabpanel" id="section-activity" aria-labelledby="nav-activity" hidden={view !== "activity"} className="pt-4">
         <div className="grid gap-4 md:grid-cols-2">
           <WeekLedger ledger={desk?.ledger ?? null} />
@@ -590,6 +598,7 @@ export function Desk({ initialInbox, ownerName }: { initialInbox: string | null;
       </p>
 
       <ChatDrawer open={chatOpen} onClose={() => setChatOpen(false)} />
+      <ChatLauncher open={chatOpen} onToggle={() => setChatOpen((o) => !o)} />
       <Toast text={toast} onDone={clearToast} />
 
       {/* ---------- footer ---------- */}

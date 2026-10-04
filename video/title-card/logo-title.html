@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fewer title card</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@500&family=Instrument+Serif&display=block" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: 1920px; height: 1080px; background: #f6f4ef; }
+  body {
+    display: flex; align-items: center; justify-content: center; gap: 72px;
+    font-family: "Geist", system-ui, sans-serif; color: #1b1f23;
+  }
+  svg { width: 400px; height: 400px; flex: none; filter: drop-shadow(0 18px 36px rgba(27,31,35,0.18)); }
+  .word { font-family: "Instrument Serif", serif; font-size: 230px; line-height: 0.85; letter-spacing: -4px; }
+  .tag { margin-top: 30px; font-size: 54px; font-weight: 500; letter-spacing: -0.5px; }
+  .sub { margin-top: 18px; font-size: 38px; font-weight: 500; color: #566070; }
+</style>
+</head>
+<body>
+  <svg viewBox="0 0 256 256" role="img" aria-label="Fewer logo">
+    <rect width="256" height="256" rx="56" fill="#1b1f23"/>
+    <g fill="none" stroke="#f6f4ef" stroke-width="9" opacity="0.5">
+      <circle cx="58" cy="128" r="24"/><circle cx="198" cy="128" r="24"/>
+    </g>
+    <circle cx="128" cy="128" r="31" fill="#f6f4ef"/>
+    <path d="M114 128.5l9.5 9.5 18-20" fill="none" stroke="#1b1f23" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  <div>
+    <div class="word">Fewer</div>
+    <div class="tag">Most agents help you do more.</div>
+    <div class="sub">Fewer helps you do less, on purpose.</div>
+  </div>
+</body>
+</html>

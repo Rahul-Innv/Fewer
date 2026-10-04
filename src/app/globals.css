@@ -190,6 +190,20 @@ body {
   animation: fade-in 150ms ease-out calc(var(--land-lead, 0ms) + 280ms) both;
 }
 
+/* Calendar: hour lines every 48px (2 rows of 24px), half-hour lines lighter. */
+.calendar-lines {
+  background-image:
+    linear-gradient(to bottom, var(--color-line) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--color-line) 45%, transparent) 1px, transparent 1px);
+  background-size: 100% 48px, 100% 24px;
+}
+
+/* Busy commitments: neutral, diagonally hatched. */
+.busy-hatch {
+  background-color: var(--color-paper);
+  background-image: repeating-linear-gradient(135deg, var(--color-line-strong) 0 1px, transparent 1px 7px);
+}
+
 /* Agenda timeline: a thin vertical line behind the verdict dots. */
 .timeline {
   position: relative;
