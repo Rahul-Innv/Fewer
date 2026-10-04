@@ -43,7 +43,8 @@ async function main() {
     const line = `${asks.length} ask(s), ${asks.filter((a) => a.verdict).length} decided${pending ? `, brief code ${pending.code}` : ""}`;
     if (line !== last) console.log(`[demo-prep] ${line}`);
     last = line;
-    if (asks.length >= 4 && pending) {
+    // All four decided (reset cleared everything else) and a live brief waiting for the owner.
+    if (asks.length >= 4 && asks.every((a) => a.verdict) && pending) {
       for (const a of asks) console.log(`  ${(a.verdict ?? "…").padEnd(8)} ${(a.rule ?? "").padEnd(3)} ${a.subject}`);
       console.log(`[demo-prep] READY. Brief code ${pending.code} for ${pending.n} draft(s); it expires in 30 min.`);
       await closeDb();

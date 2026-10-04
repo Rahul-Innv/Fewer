@@ -74,7 +74,7 @@ Check `FEWER_ALLOW_SEND` is not `false` unless you want the Fly copy to dry-run 
 
 Then add the Desk password. **Do not put `DESK_PASSWORD` in `.env.local`**: Next would load it locally
 and gate your recording session. Unset in development, the gate is a no-op. Unset in production, the
-Desk is locked: every route answers `503` until you set it.
+Desk is locked: every route answers `503` until you set it, unless you also set `DESK_GATE=off` on purpose.
 
 ```powershell
 $b = New-Object byte[] 18; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b)

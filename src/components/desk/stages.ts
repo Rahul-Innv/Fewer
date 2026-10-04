@@ -29,21 +29,14 @@ export function draftHasNoAddress(card: Pick<AskCardData, "draft">): boolean {
 }
 
 /**
- * Approved, nothing sent, the owner copies the reply. Accepts an explicit `status: "ready"`, a "sent"
- * card whose draft has no address, and the older read-model shape: "working" (not "Drafting your
- * brief") with a verdict and a no-address draft, which is otherwise not a state an ask is left in.
+ * Approved, nothing sent, the owner copies the reply. Only the persisted `status: "ready"` counts, plus a
+ * "sent" card whose draft has no address (older rows). Never inferred from a working/awaiting card.
  */
 export function isReadyToCopy(card: Pick<AskCardData, "verdict" | "status" | "draft" | "statusLabel">): boolean {
   if (card.status === "ready") return true;
   // The read-model may label an approved copy-only ask "sent"; a draft with no address is never emailed (pipeline.ts).
-  if (card.status === "sent" && draftHasNoAddress(card)) return true;
-  return (
-    card.status === "working" &&
-    card.verdict !== null &&
-    card.verdict !== "BLOCKED" &&
-    draftHasNoAddress(card) &&
-    card.statusLabel !== "Drafting your brief"
-  );
+  // Only an approved row: a no-address draft still in triage or awaiting approval is NOT ready.
+  return card.status === "sent" && draftHasNoAddress(card);
 }
 
 export function stagesFor(card: Pick<AskCardData, "verdict" | "status" | "evidence" | "draft"> & { statusLabel?: string }): StageModel {

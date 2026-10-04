@@ -28,7 +28,7 @@ The interface contract the modules were written against is in [INTERFACES.md](IN
 | `scripts/worker.ts` | The long-running process: listens on the inbox, drives the pipeline, runs the timers. | See "Processes". |
 | `scripts/` (others) | `migrate.ts`, `setup-inboxes.ts`, `seed.ts`, `smoke.ts`, `demo-reset.ts`. | Run through `npm run ...`. |
 | `src/app/` | The Desk (Next.js App Router) and its API routes: `/api/desk`, `/api/approve`, `/api/decline`, `/api/timeskip`, `/api/chat`, `/api/asks`, `/api/proactive`, `/api/login`. | |
-| `src/proxy.ts` | The Desk password gate (the Next.js 16 `proxy`, formerly middleware). | A no-op in development unless `DESK_PASSWORD` is set; fails closed in production without it. See "Deployment". |
+| `src/proxy.ts` | The Desk password gate (the Next.js 16 `proxy`, formerly middleware). | A no-op in development unless `DESK_PASSWORD` is set; fails closed in production without it, unless `DESK_GATE=off` is set explicitly. See "Deployment". |
 | `src/components/` | Desk UI (`desk/`, including `AskComposer` and `ProactivePanel`) and the assistant-ui chat drawer (`chat/`). | |
 | `sql/001_init.sql` | The schema. Every statement is `create ... if not exists`. | |
 | `fixtures/asks.golden.json` | Golden cases for `decide()`. | Read by `src/core/__tests__/decide.test.ts`. |

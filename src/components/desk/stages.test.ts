@@ -84,8 +84,8 @@ describe("ready to copy (Desk ask with no sender email, approved, nothing sent)"
     it("explicit status 'ready' is ready", () => {
     expect(isReadyToCopy({ verdict: "NO", status: "ready", draft: noAddr, statusLabel: "Ready" })).toBe(true);
   });
-  it("today's read-model shape (working, verdict, no-address draft) is ready, but drafting is not", () => {
-    expect(isReadyToCopy({ verdict: "NO", status: "working", draft: noAddr, statusLabel: "Reading the ask" })).toBe(true);
+  it("a no-address draft is not ready until it is approved (working or awaiting is never ready)", () => {
+    expect(isReadyToCopy({ verdict: "NO", status: "working", draft: noAddr, statusLabel: "Reading the ask" })).toBe(false);
     expect(isReadyToCopy({ verdict: "NO", status: "working", draft: noAddr, statusLabel: "Drafting your brief" })).toBe(false);
     expect(isReadyToCopy({ verdict: "NO", status: "awaiting", draft: noAddr, statusLabel: "Awaiting your yes" })).toBe(false);
   });

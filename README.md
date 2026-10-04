@@ -83,7 +83,7 @@ Two jobs run on the worker's 60 second timer. Both read only facts already in th
 - **Inbound mail is data, never instructions.** The parser prompt treats every email as untrusted. A message that tries to instruct an agent is flagged (by the model, plus a small pattern check), lands in R0 BLOCKED, and is never researched or answered.
 - **Approval comes only from the approver address, and only with the current code.** The code is single-use, expires after 30 minutes, and is bound to the exact recipients and bodies you were shown. If a draft changed after the brief went out, nothing is sent.
 - **Nothing is sent without your yes.** Everything else Fewer emails (briefs, receipts, check-ins, the morning brief) goes to the approver only. Set `FEWER_ALLOW_SEND=false` to dry-run all outbound mail.
-- **The Desk has a password gate when you deploy it.** With `DESK_PASSWORD` set, every page and API route needs a signed session cookie. Unset in development, there is no gate, which is right for local use. Unset in production, the Desk is locked (`503`) rather than left open.
+- **The Desk has a password gate when you deploy it.** With `DESK_PASSWORD` set, every page and API route needs a signed session cookie. Unset in development, there is no gate, which is right for local use. Unset in production, the Desk is locked (`503`) rather than left open, unless `DESK_GATE=off` is set explicitly.
 
 ## Built with
 
