@@ -44,3 +44,5 @@ private/
 .neon
 *.key
 *.pem
+# demo recordings (large binaries)
+video/out/

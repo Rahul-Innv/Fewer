@@ -7,42 +7,51 @@ Most agents help you do more.
 Fewer helps you do less.
 
 3
-00:00:04,100 --> 00:00:05,000
+00:00:04,100 --> 00:00:05,100
 On purpose.
 
 4
-00:00:05,100 --> 00:00:07,200
-Four asks just hit its inbox:
+00:00:05,200 --> 00:00:07,200
+It has its own inbox,
 
 5
-00:00:07,200 --> 00:00:10,900
-an invite, a coffee, a panel,
-and a hijack attempt.
+00:00:07,300 --> 00:00:10,300
+or I can paste on the Desk.
 
 6
-00:00:11,400 --> 00:00:14,800
-It weighs each one against
-my three goals,
+00:00:10,700 --> 00:00:13,200
+Four asks: an invite, a coffee,
 
 7
-00:00:14,900 --> 00:00:16,400
-checks who's asking,
+00:00:13,300 --> 00:00:15,000
+a panel, a hijack attempt.
 
 8
-00:00:16,400 --> 00:00:18,100
-and plain rules decide:
+00:00:15,200 --> 00:00:18,000
+It weighs them against
+my three goals,
 
 9
-00:00:18,100 --> 00:00:20,800
-yes, smaller, ask one question,
-or blocked.
+00:00:18,100 --> 00:00:19,600
+checks who's asking,
 
 10
-00:00:21,000 --> 00:00:24,600
-Then it sends me one brief,
-with a single-use code.
+00:00:19,700 --> 00:00:21,300
+and plain rules decide:
 
 11
-00:00:24,900 --> 00:00:29,500
-I reply YES and the replies
-go out, exactly once.
+00:00:21,400 --> 00:00:23,300
+yes, smaller, ask one, blocked.
+
+12
+00:00:23,400 --> 00:00:26,400
+One summary email,
+one single-use code.
+
+13
+00:00:26,500 --> 00:00:27,900
+I approve once;
+
+14
+00:00:28,000 --> 00:00:29,900
+each reply goes out exactly once.

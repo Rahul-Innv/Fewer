@@ -240,7 +240,9 @@ export function listenInbox(
         await onMessage(ref);
         attempts.delete(ref.messageId);
         // Durable marker so a restart never re-delivers this message.
-        void addLabels(inboxId, ref.messageId, [PROCESSED_LABEL]).catch(() => {});
+        void addLabels(inboxId, ref.messageId, [PROCESSED_LABEL]).catch((e) =>
+          console.warn(`[mail] could not label ${ref.messageId} as processed (replay may re-deliver it; dedupe makes that safe): ${errMsg(e)}`),
+        );
       } catch (err) {
         const n = (attempts.get(ref.messageId) ?? 0) + 1;
         attempts.set(ref.messageId, n);

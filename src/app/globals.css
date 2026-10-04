@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "tw-shimmer";
 
 /*
  * Fewer design tokens. Role-named, never hue-named.
@@ -44,6 +45,17 @@
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
   --font-serif: var(--font-serif-display), Georgia, "Times New Roman", serif;
+
+  /*
+   * shadcn / assistant-ui registry role names, aliased onto the Fewer roles above.
+   * Aliases only (no new hex), so tokens.ts stays the single source of color.
+   * `muted` is deliberately NOT aliased: in Fewer it is AA text (#566070), not a fill.
+   */
+  --color-background: var(--color-surface);
+  --color-foreground: var(--color-ink);
+  --color-border: var(--color-line);
+  --color-popover: var(--color-surface);
+  --color-destructive: var(--color-blocked-accent);
 }
 
 :root {
@@ -178,6 +190,12 @@ body {
   animation: fade-in 150ms ease-out calc(var(--land-lead, 0ms) + 280ms) both;
 }
 
+/* Agent status label change and the approval receipt: a short fade, once. */
+.status-in,
+.receipt-in {
+  animation: fade-in 180ms ease-out both;
+}
+
 /* Skeleton bars: bg-line with a light sweep, 1.4s linear. No spinner. */
 .skeleton-bar {
   position: relative;
@@ -198,6 +216,8 @@ body {
   .drawer-in,
   .live-dot,
   .verdict-edge,
+  .status-in,
+  .receipt-in,
   .skeleton-bar::after {
     animation: none;
   }

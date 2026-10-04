@@ -28,7 +28,7 @@ The interface contract the modules were written against is in [INTERFACES.md](IN
 | `scripts/worker.ts` | The long-running process: listens on the inbox, drives the pipeline, runs the timers. | See "Processes". |
 | `scripts/` (others) | `migrate.ts`, `setup-inboxes.ts`, `seed.ts`, `smoke.ts`, `demo-reset.ts`. | Run through `npm run ...`. |
 | `src/app/` | The Desk (Next.js App Router) and its API routes: `/api/desk`, `/api/approve`, `/api/decline`, `/api/timeskip`, `/api/chat`, `/api/asks`, `/api/proactive`, `/api/login`. | |
-| `src/proxy.ts` | The Desk password gate (the Next.js 16 `proxy`, formerly middleware). | A no-op unless `DESK_PASSWORD` is set. See "Deployment". |
+| `src/proxy.ts` | The Desk password gate (the Next.js 16 `proxy`, formerly middleware). | A no-op in development unless `DESK_PASSWORD` is set; fails closed in production without it, unless `DESK_GATE=off` is set explicitly. See "Deployment". |
 | `src/components/` | Desk UI (`desk/`, including `AskComposer` and `ProactivePanel`) and the assistant-ui chat drawer (`chat/`). | |
 | `sql/001_init.sql` | The schema. Every statement is `create ... if not exists`. | |
 | `fixtures/asks.golden.json` | Golden cases for `decide()`. | Read by `src/core/__tests__/decide.test.ts`. |
@@ -46,7 +46,7 @@ Two processes share one Neon database.
 
 On Fly.io the same image runs as two process groups from `fly.toml`: `web` (the Desk and `/api/*`, public) and `worker` (`scripts/worker.ts`, no public service). Run exactly one worker: the listener dedupes by message id in memory, so two of them would both handle every email. Schema migrations run inside the worker on boot. [DEPLOY.md](DEPLOY.md) has the steps, the rollback commands and the tradeoffs.
 
-The Desk is protected by `src/proxy.ts` when `DESK_PASSWORD` is set. Every page and API route then needs the signed `fewer_desk` cookie (HMAC-SHA256 over an expiry, HttpOnly, 12 hours), except `/login` and `/api/login`. Pages redirect to `/login` and `/api/*` answers `401`. With the variable unset, the gate does nothing.
+The Desk is protected by `src/proxy.ts` when `DESK_PASSWORD` is set. Every page and API route then needs the signed `fewer_desk` cookie (HMAC-SHA256 over an expiry, HttpOnly, 12 hours), except `/login` and `/api/login`. Pages redirect to `/login` and `/api/*` answers `401`. With the variable unset, the gate does nothing in development and locks every route with `503` in production, unless `DESK_GATE=off` is set on purpose.
 
 ## Intake channels
 
@@ -134,7 +134,7 @@ A send that fails is recorded as `failed` with its error and shown on the Desk. 
 | What goes wrong | What Fewer does |
 |---|---|
 | **Exa errors or takes longer than 25 s** | `researchAsk` returns no claims and logs a warning. With zero verified claims, R3 YES and R5 WILDCARD cannot fire, so the ask resolves through the other checks (typically R6 NO). The Desk shows "No outside sources found for this ask" when nothing came back, and "unverified, couldn't check" on any source that was not corroborated by a second domain. |
-| **AgentMail websocket drops** | `listenInbox` reconnects with backoff from 1 s up to 30 s. The 5 s `messages.list` poll runs the whole time, so new mail is picked up either way. Duplicates are dropped by message id in memory and by `asks.inbox_message_id` in the database. A handler that throws is retried up to 3 times. Mail that was already in the inbox when the worker started is not replayed. |
+| **AgentMail websocket drops** | `listenInbox` reconnects with backoff from 1 s up to 30 s. The 5 s `messages.list` poll runs the whole time, so new mail is picked up either way. Duplicates are dropped by message id in memory and by `asks.inbox_message_id` in the database. A handler that throws is retried up to 3 times. On start, inbound mail from the last 30 minutes without the `fewer-processed` label is replayed (it arrived while the worker was down); older or already-processed mail is skipped. Replay is safe: asks dedupe on `inbox_message_id`, approval codes are single-use, and check-in replies are gated. |
 | **Approval code expired** | After 30 minutes the code no longer matches. The approver gets a "Not sent" reply: "code expired" if `approveByCode` sees it first, or "no pending approval with that code" if the worker's 60 s sweep already marked it `expired`. The drafts are no longer attached to a live approval, so the next brief includes them again. |
 | **Drafts changed since the brief** | The hash recomputed at approval time differs (or a draft is missing). The approval is marked `expired`, an `approval_refused` event is logged, and the approver gets "Not sent: drafts changed since approval." Nothing is sent. |
 | **Wrong code, or a reply from someone else** | A wrong code from the approver is ignored with a hint to use the code shown in the brief. A reply from anyone else is never treated as an approval. |

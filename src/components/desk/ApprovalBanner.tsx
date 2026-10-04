@@ -1,8 +1,12 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { BellRing, Check, Hourglass, Loader2, Mail, Pause, TriangleAlert } from "lucide-react";
+import { BellRing, Hourglass, Mail } from "lucide-react";
+import { ApprovalCard, type ApprovalState } from "@/components/assistant-ui/elements/approval-card";
+import type { Verdict } from "@/core/contracts";
 import type { ApproveResponse, DeclineResponse, PendingApprovalView } from "./types";
+import { VerdictChip } from "./VerdictChip";
+import { draftHasNoAddress } from "./stages";
 import { clockTime, formatRemaining, plural } from "./format";
 import { useCountdown } from "./useCountdown";
 
@@ -19,12 +23,6 @@ type Phase =
   | { kind: "receipt"; receipt: Receipt; leaving: boolean }
   | { kind: "dead"; text: string }
   | { kind: "gone" };
-
-const RECEIPT_STYLE: Record<ReceiptTone, { box: string; Icon: typeof Check }> = {
-  yes: { box: "border-yes-accent/40 bg-yes-bg text-yes-fg", Icon: Check },
-  no: { box: "border-no-accent/40 bg-no-bg text-no-fg", Icon: Pause },
-  warn: { box: "border-smaller-accent/40 bg-warn-bg text-warn-fg", Icon: TriangleAlert },
-};
 
 function expiredCopy(expiresAt: string | null, timeZone?: string): string {
   const at = expiresAt ? clockTime(expiresAt, timeZone) : "";
@@ -83,25 +81,17 @@ function Collapse({ open, children }: { open: boolean; children: ReactNode }) {
   );
 }
 
-function ReceiptRow({ receipt }: { receipt: Receipt }) {
-  const { box, Icon } = RECEIPT_STYLE[receipt.tone];
-  return (
-    <p className={`flex items-center gap-2 rounded-2xl border px-5 py-3 text-[14px] font-medium ${box}`}>
-      <Icon aria-hidden className="size-4 shrink-0" />
-      {receipt.text}
-    </p>
-  );
-}
-
-function ApprovalCard({
+function PendingBrief({
   pending,
   live,
   approver,
   onChanged,
   timeZone,
   className,
+  verdictByDraft,
 }: {
   pending: PendingApprovalView;
+  verdictByDraft?: Record<string, Verdict | null | undefined>;
   /** false once the server stopped listing this approval as pending (we keep showing our own receipt or refusal). */
   live: boolean;
   approver: string | null;
@@ -113,6 +103,8 @@ function ApprovalCard({
   const [error, setError] = useState<string | null>(null);
   const { remainingMs, fraction, expired } = useCountdown(pending.expiresAt, pending.createdAt);
   const n = pending.drafts.length;
+  // Desk asks added without a sender email: approving marks them ready to copy; nothing is emailed.
+  const copyOnly = pending.drafts.filter((d) => draftHasNoAddress({ draft: d })).length;
 
   // Latch the expiry while the server still lists the approval, so the notice survives the poll that drops it.
   if (phase.kind === "idle" && expired && live) {
@@ -139,7 +131,7 @@ function ApprovalCard({
   const deadText = phase.kind === "dead" ? phase.text : null;
   const dead = deadText !== null;
   const receipt = phase.kind === "receipt" ? phase.receipt : null;
-  const receiptOpen = phase.kind === "receipt" && !phase.leaving;
+  const leaving = phase.kind === "receipt" && phase.leaving;
   const nothingToSend = n === 0;
 
   function showReceipt(r: Receipt) {
@@ -147,6 +139,7 @@ function ApprovalCard({
   }
 
   async function approve() {
+    if (busy !== null || nothingToSend) return;
     setPhase({ kind: "busy", action: "approve" });
     setError(null);
     const { ok, data } = await post<ApproveResponse>("/api/approve", { code: pending.code });
@@ -154,8 +147,9 @@ function ApprovalCard({
     const sent = typeof data.sent === "number" ? data.sent : null;
 
     if (ok) {
-      const what = sent === null ? "Approved" : sent > 0 ? `Sent ${plural(sent, "reply", "replies")}` : "Nothing new sent";
-      showReceipt({ tone: "yes", text: `${what} · ${time} · code used`, holdMs: RECEIPT_MS });
+      const what = sent === null ? "Approved" : sent > 0 ? `Sent ${plural(sent, "reply", "replies")}` : copyOnly > 0 ? "Approved" : "Nothing new sent";
+      const copyNote = copyOnly > 0 ? ` · ${plural(copyOnly, "reply", "replies")} ready to copy, not sent` : "";
+      showReceipt({ tone: "yes", text: `${what}${copyNote} · ${time} · code used`, holdMs: RECEIPT_MS });
       return;
     }
 
@@ -184,6 +178,7 @@ function ApprovalCard({
   }
 
   async function hold() {
+    if (busy !== null) return;
     setPhase({ kind: "busy", action: "hold" });
     setError(null);
     const { ok, data } = await post<DeclineResponse>("/api/decline", { approvalId: pending.id });
@@ -200,95 +195,65 @@ function ApprovalCard({
     onChanged();
   }
 
-  const btnBase =
-    "inline-flex h-9 items-center gap-1.5 rounded-lg px-3.5 text-[13.5px] transition duration-100 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100";
+  const state: ApprovalState = receipt ? (receipt.tone === "no" ? "denied" : "done") : busy ? "running" : "request";
+  const closed = dead || receipt !== null;
+  const timerText =
+    remainingMs === null ? "No expiry" : dead && expired ? "Expired" : closed ? "Closed" : `${formatRemaining(remainingMs)} left`;
+  const sendLabel = plural(n, "reply", "replies");
 
   return (
     <div className={className}>
-      <div role="status" aria-live="polite">
-        <Collapse open={receiptOpen}>{receipt ? <ReceiptRow receipt={receipt} /> : null}</Collapse>
-      </div>
-
-      <Collapse open={phase.kind !== "receipt"}>
-        <section
-          aria-labelledby="approval-h"
-          className={`overflow-hidden rounded-2xl border bg-surface ${
+      <Collapse open={!leaving}>
+        <ApprovalCard
+          state={state}
+          variant={dead ? "inactive" : "default"}
+          icon={<BellRing className="size-4" />}
+          title={dead ? "This brief is no longer awaiting a yes" : "1 brief awaiting your yes"}
+          subtitle={`Fewer drafted ${sendLabel}. Nothing sends without your yes.`}
+          allowOnceLabel={`Approve & send ${sendLabel}`}
+          denyLabel="Hold"
+          onAllowOnce={nothingToSend ? undefined : approve}
+          onDeny={hold}
+          statusLabel={
+            receipt
+              ? receipt.text
+              : busy === "approve"
+                ? `Sending ${sendLabel}…`
+                : busy === "hold"
+                  ? "Holding the brief…"
+                  : undefined
+          }
+          statusTone={receipt?.tone}
+          className={
             dead
               ? "border-line-strong"
               : "border-askone-accent/50 shadow-[0_8px_30px_-12px_color-mix(in_srgb,var(--color-askone-accent)_35%,transparent)]"
-          }`}
-        >
-          <div
-            className={`flex items-center gap-3 px-4 py-3 sm:px-5 ${dead ? "bg-no-bg text-no-fg" : "bg-askone-bg text-askone-fg"}`}
-          >
+          }
+          aside={
             <span
-              className={`grid size-7 shrink-0 place-items-center rounded-full text-white ${
-                dead ? "bg-no-accent" : "live-dot bg-askone-accent"
+              role="timer"
+              aria-live="off"
+              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium tabular-nums ${
+                closed ? "bg-no-bg text-no-fg" : "bg-askone-bg text-askone-fg"
               }`}
             >
-              <BellRing aria-hidden className="size-4" />
+              <Hourglass aria-hidden className="size-4" />
+              {timerText}
             </span>
-            <h2 id="approval-h" className="text-[14.5px] font-semibold">
-              {dead ? "This brief is no longer awaiting a yes" : "1 brief awaiting your yes"}
-            </h2>
-          </div>
-
-          {fraction !== null ? (
-            <div aria-hidden className="h-0.5 bg-line">
-              <div
-                className="h-full bg-askone-accent transition-[width] duration-1000 ease-linear"
-                style={{ width: `${(dead ? 0 : fraction) * 100}%` }}
-              />
-            </div>
-          ) : null}
-
-          <div className="p-4 sm:p-5">
-            <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
-              <div className="min-w-0">
-                <p className="text-[12px] text-muted">Single-use code</p>
-                <p
-                  className={`mt-1.5 break-all font-mono text-[30px] leading-none tracking-[0.22em] tabular-nums ${
-                    dead ? "text-muted line-through" : "text-ink"
-                  }`}
-                >
-                  {pending.code}
-                </p>
+          }
+          progress={
+            fraction !== null ? (
+              <div aria-hidden className="h-0.5 bg-line">
+                <div
+                  className="h-full bg-askone-accent transition-[width] duration-1000 ease-linear"
+                  style={{ width: `${(closed ? 0 : fraction) * 100}%` }}
+                />
               </div>
-              <span
-                role="timer"
-                aria-live="off"
-                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium tabular-nums ${
-                  dead ? "bg-no-bg text-no-fg" : "bg-askone-bg text-askone-fg"
-                }`}
-              >
-                <Hourglass aria-hidden className="size-4" />
-                {remainingMs === null
-                  ? "No expiry"
-                  : dead
-                    ? expired
-                      ? "Expired"
-                      : "Closed"
-                    : `${formatRemaining(remainingMs)} left`}
-              </span>
-            </div>
-
-            <ul className="mt-4 divide-y divide-line border-y border-line">
-              {pending.drafts.map((d) => (
-                <li key={d.id} className="py-3">
-                  <p className="flex flex-wrap items-baseline gap-x-2 text-[13.5px]">
-                    <span className="font-medium text-ink">{d.askTitle}</span>
-                    <span className="inline-flex items-center gap-1 text-[12.5px] text-muted">
-                      <Mail aria-hidden className="size-3" />
-                      {d.to}
-                    </span>
-                  </p>
-                  <p className="mt-0.5 line-clamp-2 text-[13px] leading-snug text-muted">{d.body}</p>
-                </li>
-              ))}
-            </ul>
-
-            {deadText !== null ? (
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-lg bg-paper px-3 py-2 text-[13px] text-muted">
+            ) : null
+          }
+          footer={
+            deadText !== null ? (
+              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-lg bg-paper px-3 py-2 text-[13px] text-muted">
                 <p>{deadText}</p>
                 <button
                   type="button"
@@ -298,57 +263,18 @@ function ApprovalCard({
                   Dismiss
                 </button>
               </div>
-            ) : (
+            ) : undefined
+          }
+          footnote={
+            closed ? null : (
               <>
-                <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-[13px] text-ink">
-                    Approving sends exactly these {n} {n === 1 ? "draft" : "drafts"}, once.
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={hold}
-                      disabled={busy !== null}
-                      className={`${btnBase} border border-line-strong bg-surface font-medium text-ink hover:bg-paper`}
-                    >
-                      {busy === "hold" ? (
-                        <Loader2 aria-hidden className="size-4 animate-spin" />
-                      ) : (
-                        <Pause aria-hidden className="size-4" />
-                      )}
-                      Hold
-                    </button>
-                    <button
-                      type="button"
-                      onClick={approve}
-                      disabled={busy !== null || nothingToSend}
-                      aria-describedby={nothingToSend ? "approval-why-disabled" : undefined}
-                      className={`${btnBase} bg-action font-semibold text-action-ink hover:bg-black`}
-                    >
-                      {busy === "approve" ? (
-                        <Loader2 aria-hidden className="size-4 animate-spin" />
-                      ) : (
-                        <Check aria-hidden className="size-4" />
-                      )}
-                      {busy === "approve"
-                        ? `Sending ${plural(n, "reply", "replies")}…`
-                        : `Approve & send ${plural(n, "reply", "replies")}`}
-                    </button>
-                  </div>
-                </div>
                 {nothingToSend ? (
-                  <p id="approval-why-disabled" className="mt-2 text-[13px] text-muted">
-                    This brief has no drafts, so there is nothing to approve.
-                  </p>
+                  <p className="text-[13px] text-muted">This brief has no drafts, so there is nothing to approve.</p>
                 ) : null}
-                <p
-                  role="status"
-                  aria-live="polite"
-                  className={error ? "mt-2.5 text-[13px] text-blocked-fg" : "sr-only"}
-                >
+                <p role="status" aria-live="polite" className={error ? "text-[13px] text-blocked-fg" : "sr-only"}>
                   {error ?? ""}
                 </p>
-                <p className="mt-2.5 text-[12.5px] text-muted">
+                <p className="text-[12.5px] text-muted">
                   Or reply <span className="font-mono text-ink">YES {pending.code}</span>
                   {approver ? (
                     <>
@@ -359,16 +285,44 @@ function ApprovalCard({
                   . The code works once.
                 </p>
               </>
-            )}
+            )
+          }
+        >
+          <div className="min-w-0">
+            <p className="text-[12px] text-muted">Single-use code</p>
+            <p
+              className={`mt-1.5 break-all font-mono text-[30px] leading-none tracking-[0.22em] tabular-nums ${
+                dead ? "text-muted line-through" : "text-ink"
+              }`}
+            >
+              {pending.code}
+            </p>
           </div>
-        </section>
+
+          <ul className="divide-y divide-line border-y border-line" aria-label="Drafts in this brief">
+            {pending.drafts.map((d) => (
+              <li key={d.id} className="py-3">
+                <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13.5px]">
+                  {verdictByDraft?.[d.id] ? <VerdictChip verdict={verdictByDraft[d.id]!} /> : null}
+                  <span className="font-medium text-ink">{d.askTitle}</span>
+                  <span className="inline-flex items-center gap-1 text-[12.5px] text-muted">
+                    <Mail aria-hidden className="size-3" />
+                    {draftHasNoAddress({ draft: d }) ? "No email address: you copy it after your yes" : d.to}
+                  </span>
+                </p>
+                <p className="mt-0.5 line-clamp-2 text-[13px] leading-snug text-muted">{d.body}</p>
+              </li>
+            ))}
+          </ul>
+        </ApprovalCard>
       </Collapse>
     </div>
   );
 }
 
 /**
- * Pending brief: one container with the single-use code as the hero, a bar that drains
+ * Pending brief, rendered with the assistant-ui Approval card element in standalone mode
+ * (we own the state). One container with the single-use code as the hero, a bar that drains
  * with the real expires_at, a count in the CTA, and a receipt after approve or hold.
  *
  * `pending` may become null while this is mounted (approved here or by email): the last
@@ -381,8 +335,11 @@ export function ApprovalBanner({
   onChanged,
   timeZone,
   className,
+  verdictByDraft,
 }: {
   pending: PendingApprovalView | null;
+  /** Draft id -> the verdict of the ask it answers (from /api/desk asks[].draft.id). Shown as a solid badge per draft. */
+  verdictByDraft?: Record<string, Verdict | null | undefined>;
   approver: string | null;
   onChanged: () => void;
   /** IANA zone for the clock times in receipts and expiry notices; defaults to the browser's. */
@@ -395,7 +352,7 @@ export function ApprovalBanner({
   const shown = pending ?? last;
   if (!shown) return null;
   return (
-    <ApprovalCard
+    <PendingBrief
       key={shown.id}
       pending={shown}
       live={pending !== null}
@@ -403,6 +360,7 @@ export function ApprovalBanner({
       onChanged={onChanged}
       timeZone={timeZone}
       className={className}
+      verdictByDraft={verdictByDraft}
     />
   );
 }

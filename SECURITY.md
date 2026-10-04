@@ -26,7 +26,7 @@ Fewer sends email for its owner, so the reports that matter most are the ones th
 
 ## Deployment notes
 
-- The Desk has no login unless `DESK_PASSWORD` is set. Do not expose a Desk to the internet without it. See [docs/DEPLOY.md](docs/DEPLOY.md).
+- The Desk has no login unless `DESK_PASSWORD` is set. In production it fails closed without one (`503` on every route) unless `DESK_GATE=off` is set; do not set that on a Desk the internet can reach. See [docs/DEPLOY.md](docs/DEPLOY.md).
 - Secrets live only in environment variables (`.env.local` locally, `fly secrets` on Fly.io) and are never committed. `.env*` files other than `.env.example` are gitignored.
 - If a key is ever exposed, rotate it right away. Treat anything that touched a commit, a log or a transcript as compromised.
 - Mastra traces include email text. Use demo data only when tracing is on ([docs/MASTRA.md](docs/MASTRA.md)).

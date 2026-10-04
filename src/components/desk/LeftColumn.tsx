@@ -5,6 +5,7 @@ import type { Verdict } from "@/core/contracts";
 import type { BoundaryView, JourneyView, LedgerView, OutcomeRowView } from "./types";
 import { VERDICTS } from "./tokens";
 import { formatHours, relativeTime } from "./format";
+import { NumberRoll } from "@/components/ui/number-roll";
 
 const STRENGTH: Record<string, { label: string; cls: string }> = {
   absolute: { label: "Absolute", cls: "bg-ink text-action-ink" },
@@ -23,7 +24,10 @@ function SectionTitle({ icon, children }: { icon: React.ReactNode; children: Rea
   );
 }
 
-export function WeekLedger({ ledger }: { ledger: LedgerView }) {
+/** Hours protected (assistant-ui Number Roll) and verdict counts. `ledger` is null until /api/desk answers: skeleton, never a placeholder 0. */
+export function WeekLedger({ ledger: maybe }: { ledger: LedgerView | null }) {
+  const ledger = maybe ?? { yes: 0, wildcard: 0, smaller: 0, no: 0, askOne: 0, blocked: 0, hoursProtected: 0 };
+  const loading = maybe === null;
   const cells: { key: string; verdict: Verdict; count: number; note?: string }[] = [
     { key: "yes", verdict: "YES", count: ledger.yes + ledger.wildcard, note: ledger.wildcard ? `incl. ${ledger.wildcard} wildcard` : undefined },
     { key: "smaller", verdict: "SMALLER", count: ledger.smaller },
@@ -34,11 +38,18 @@ export function WeekLedger({ ledger }: { ledger: LedgerView }) {
   return (
     <section aria-label="Week ledger" className="rounded-xl border border-line bg-surface p-4">
       <SectionTitle icon={<Gauge className="size-3.5" />}>Week ledger</SectionTitle>
-      <p className="font-serif text-[44px] leading-none tracking-tight text-ink tabular">
-        {formatHours(ledger.hoursProtected)}
-        <span className="ml-1 font-sans text-base font-medium text-muted">h</span>
-      </p>
-      <p className="mt-1 text-[13px] text-muted">protected this week</p>
+      {loading ? (
+        <div aria-hidden className="skeleton-bar h-11 w-24 rounded-lg bg-line" />
+      ) : (
+        <p className="font-serif text-[44px] leading-none tracking-tight text-ink tabular">
+          <span className="sr-only">{formatHours(ledger.hoursProtected)} hours</span>
+          <NumberRoll aria-hidden value={ledger.hoursProtected} format={{ maximumFractionDigits: 1 }} locales="en-US" />
+          <span aria-hidden className="ml-1 font-sans text-base font-medium text-muted">
+            h
+          </span>
+        </p>
+      )}
+      <p className="mt-1 text-[13px] text-muted">Hours protected this week</p>
       <ul className="mt-4 grid grid-cols-5 gap-1.5" aria-label="Verdicts this week">
         {cells.map((c) => {
           const v = VERDICTS[c.verdict];
@@ -48,7 +59,7 @@ export function WeekLedger({ ledger }: { ledger: LedgerView }) {
               title={c.note}
               className={`flex flex-col items-center rounded-lg px-1 py-2 ${c.count > 0 ? v.chip : "bg-paper text-muted"}`}
             >
-              <span className="text-lg font-semibold leading-none tabular">{c.count}</span>
+              <span className="text-lg font-semibold leading-none tabular">{loading ? "–" : c.count}</span>
               <span className="mt-1 text-[9.5px] font-semibold uppercase tracking-[0.06em]">{v.label}</span>
             </li>
           );

@@ -40,6 +40,7 @@ Extraction rules:
 - inPerson: true if the owner must physically attend somewhere; false for remote/virtual/email-only.
 - url: the main event/organizer URL if present, else null.
 - organizer: the person or organization hosting/asking (not the owner), else null.
+- signedName: the first name the sender signs the email with (e.g. "- Sam" gives "Sam"); null if unsigned. Never an inbox label like "Event Host".
 - fits: exactly one entry per journey given, using the journey ids exactly as provided. score 0 = unrelated, 1 = weak, 2 = clear fit, 3 = direct strong fit. reason: at most 20 words; when score >= 1 quote a short phrase from the email in double quotes; when 0 say "no connection".
 Never invent facts. If something is not stated, use null. Output only the requested JSON.`;
 
@@ -140,6 +141,8 @@ const ModelAskSchema = z.object({
   inPerson: z.boolean(),
   url: z.string().nullable(),
   organizer: z.string().nullable(),
+  /** The name the person signs the email with ("- Sam"), so replies don't greet an inbox label. */
+  signedName: z.string().nullable(),
   containsInstructionsToAgent: z.boolean(),
   fits: z.array(
     z.object({
@@ -326,7 +329,8 @@ export async function parseAsk(
   const url = nonEmpty(object.url) ?? firstUrl(i.text ?? "");
   const organizer = nonEmpty(object.organizer);
   const fromEmail = normalizeEmail(i.from);
-  const fromName = nonEmpty(i.fromName);
+  // Prefer the name the person signed with over the From display name (often an inbox label).
+  const fromName = nonEmpty(object.signedName) ?? nonEmpty(i.fromName);
 
   const ask = ParsedAskSchema.parse({
     id: i.askId ?? i.messageId,

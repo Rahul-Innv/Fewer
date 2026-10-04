@@ -26,7 +26,8 @@ export type DraftView = {
   body: string;
 };
 
-export type CardStatus = "awaiting" | "sent" | "held" | "blocked" | "working" | "error";
+/** "ready": approved, but the draft has no email address, so nothing was sent; the owner copies it from the Desk. */
+export type CardStatus = "awaiting" | "sent" | "ready" | "held" | "blocked" | "working" | "error";
 
 export type OutcomeView = {
   rating: number;
