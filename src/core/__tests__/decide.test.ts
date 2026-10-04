@@ -188,11 +188,71 @@ describe("decide: rule paths", () => {
     expect(d.reasons.join(" | ")).toContain("Weekend mornings are for long runs (preference)");
   });
 
-  it("R3 requires a verified claim; strong fit without verification falls to R6", () => {
+  it("R3 requires a verified claim for an event; strong fit without verification falls to R6", () => {
     const d = decide(makeAsk(), [{ journeyId: "j1", score: 3, reason: "users" }], [], journeys, boundaries, baseCtx);
     expect(d.verdict).toBe("NO");
     expect(d.rule).toBe("R6");
     expect(d.reasons[0]).toContain("none of its claims checked out");
+  });
+
+  it("R3 needs no verified claim for a meeting or request: a private ask has nothing to corroborate", () => {
+    const fits: Fit[] = [{ journeyId: "j1", score: 2, reason: "builder swap" }];
+    const meeting = decide(makeAsk({ kind: "meeting", tag: "coffee", durationMin: 45 }), fits, [], journeys, boundaries, baseCtx);
+    expect(meeting.verdict).toBe("YES");
+    expect(meeting.rule).toBe("R3");
+    // No "0 claims checked out" line for an ask that was never checkable.
+    expect(meeting.reasons.join(" | ")).not.toContain("checked out");
+    expect(meeting.verifiedClaims).toBe(0);
+
+    const request = decide(
+      makeAsk({ kind: "request", tag: "request", startsAt: undefined, durationMin: undefined }),
+      fits,
+      [],
+      journeys,
+      boundaries,
+      baseCtx,
+    );
+    expect(request.rule).toBe("R3");
+
+    const other = decide(makeAsk({ kind: "other", tag: "other" }), fits, [], journeys, boundaries, baseCtx);
+    expect(other.rule).toBe("R3");
+  });
+
+  it("a verified claim on a meeting is still cited when present", () => {
+    const d = decide(
+      makeAsk({ kind: "meeting", tag: "coffee" }),
+      [{ journeyId: "j1", score: 2, reason: "x" }],
+      [VERIFIED_CLAIM],
+      journeys,
+      boundaries,
+      baseCtx,
+    );
+    expect(d.rule).toBe("R3");
+    expect(d.reasons.join(" | ")).toContain("1 claim checked out on 2+ independent sites");
+  });
+
+  it("non-events still need a rank 1 or 2 link and an open evening for R3, and never get the corroboration reason", () => {
+    const rank3 = decide(
+      makeAsk({ kind: "meeting", tag: "coffee" }),
+      [{ journeyId: "j3", score: 3, reason: "run club" }],
+      [],
+      journeys,
+      boundaries,
+      baseCtx,
+    );
+    expect(rank3.rule).toBe("R6");
+    expect(rank3.reasons[0]).toContain("#3 goal");
+
+    const softCap: Boundary[] = [
+      { id: "soft", strength: "preference", label: "Prefer 1 evening out", rule: { type: "max_evenings_out_per_week", n: 1 } },
+    ];
+    const evening = makeAsk({ kind: "meeting", tag: "coffee", startsAt: "2026-10-08T18:30:00-07:00", inPerson: true });
+    const fits: Fit[] = [{ journeyId: "j2", score: 3, reason: "x" }];
+    expect(decide(evening, fits, [], journeys, softCap, ctxWith({ eveningsOutThisWeek: 0 })).verdict).toBe("YES");
+    const full = decide(evening, fits, [], journeys, softCap, ctxWith({ eveningsOutThisWeek: 1 }));
+    expect(full.rule).toBe("R6");
+    expect(full.reasons[0]).toContain("no evenings left");
+    expect(full.reasons.join(" | ")).not.toContain("checked out");
   });
 
   it("R3 requires a rank 1 or 2 journey; rank-3 strong fit is a NO", () => {
@@ -220,10 +280,12 @@ describe("decide: rule paths", () => {
     expect(full.reasons[0]).toContain("no evenings left");
   });
 
-  it("R4 meeting over 90 min offers 30 minutes", () => {
+  it("R4 meeting over 90 min with only a light (1/3) link offers 30 minutes", () => {
+    // Was fit 2 before non-events stopped needing verification: a fit-2 meeting with no claims now
+    // reaches R3 YES first, so the R4 path needs a link too light for R3.
     const d = decide(
       makeAsk({ kind: "meeting", durationMin: 120 }),
-      [{ journeyId: "j1", score: 2, reason: "x" }],
+      [{ journeyId: "j1", score: 1, reason: "x" }],
       [],
       journeys,
       boundaries,
@@ -233,13 +295,25 @@ describe("decide: rule paths", () => {
     expect(d.smallerOffer).toBe("Offer 30 minutes instead");
   });
 
-  it("R5 is skipped once the wildcard is used, and needs a verified claim", () => {
+  it("R5 for an event is skipped once the wildcard is used, and needs a verified claim", () => {
     const fits: Fit[] = [{ journeyId: "j3", score: 1, reason: "x" }];
     expect(decide(makeAsk(), fits, [VERIFIED_CLAIM], journeys, boundaries, baseCtx).verdict).toBe("WILDCARD");
     const used = decide(makeAsk(), fits, [VERIFIED_CLAIM], journeys, boundaries, ctxWith({ wildcardUsedThisWeek: true }));
     expect(used.verdict).toBe("NO");
     expect(used.reasons).toContain("This week's exploratory yes is already used");
     expect(decide(makeAsk(), fits, [], journeys, boundaries, baseCtx).verdict).toBe("NO");
+  });
+
+  it("R5 for a meeting needs no verified claim; it is still skipped once the wildcard is used", () => {
+    const fits: Fit[] = [{ journeyId: "j3", score: 1, reason: "x" }];
+    const meeting = makeAsk({ kind: "meeting", tag: "coffee", durationMin: 45 });
+    const d = decide(meeting, fits, [], journeys, boundaries, baseCtx);
+    expect(d.verdict).toBe("WILDCARD");
+    expect(d.rule).toBe("R5");
+    expect(d.reasons.join(" | ")).not.toContain("checked out");
+    const used = decide(meeting, fits, [], journeys, boundaries, ctxWith({ wildcardUsedThisWeek: true }));
+    expect(used.rule).toBe("R6");
+    expect(used.reasons).toContain("This week's exploratory yes is already used");
   });
 
   it("R6 sets pushesOut to the rank-1 journey title and cites it", () => {

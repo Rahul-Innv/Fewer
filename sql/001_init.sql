@@ -111,5 +111,8 @@ create index if not exists events_log_kind_idx on events_log (kind);
 create index if not exists checkins_thread_idx on checkins (thread_id);
 
 -- One live send per draft across ALL approvals (two processes can brief the same draft; only one may send).
-create unique index if not exists actions_one_live_per_draft
-  on actions (draft_id) where status in ('sending', 'sent', 'ready');
+-- v2 adds 'simulated' (demo approvals). Create the new guard first, then drop the old one, so there is
+-- never a moment without a uniqueness guard and concurrent migrates stay idempotent.
+create unique index if not exists actions_one_live_per_draft_v2
+  on actions (draft_id) where status in ('sending', 'sent', 'ready', 'simulated');
+drop index if exists actions_one_live_per_draft;

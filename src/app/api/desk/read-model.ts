@@ -39,6 +39,7 @@ function emptyDesk(error: string | null, configured: boolean): DeskData {
     boundaries: [],
     ledger: { ...EMPTY_LEDGER },
     pending: null,
+    pendingDemo: null,
     asks: [],
     outcomes: [],
     checkinsSent: 0,
@@ -62,6 +63,7 @@ type AskRow = {
   received_at: Date;
   parsed: ParsedAsk | null;
   status: string;
+  inbox_message_id: string;
 };
 type DecisionRow = { ask_id: string; verdict: Verdict; rule: string; decision: Decision | null; fits: Fit[] | null; created_at: Date };
 type EvidenceRow = { ask_id: string; claims: EvidenceClaim[] | null };
@@ -89,6 +91,8 @@ function statusFor(ask: AskRow, verdict: Verdict | null, sentAt: string | null):
       return { status: "sent", label: "Sent" };
     case "ready":
       return { status: "ready", label: "Approved. Ready to copy; Fewer sent nothing." };
+    case "simulated":
+      return { status: "sent", label: "Demo: approved. This reply would be sent; nothing was emailed." };
     case "awaiting_approval":
       return { status: "awaiting", label: "Awaiting your yes" };
     case "declined":
@@ -129,7 +133,7 @@ export async function buildDesk(): Promise<DeskData> {
     }
 
     const askRows = await sql<AskRow[]>`
-      select id, from_email, from_name, subject, received_at, parsed, status
+      select id, from_email, from_name, subject, received_at, parsed, status, inbox_message_id
       from asks order by received_at desc, id desc limit 40`;
     const askIds = askRows.map((a) => a.id);
 
@@ -246,25 +250,33 @@ export async function buildDesk(): Promise<DeskData> {
         sentAt,
         checkinSent: checkinAskIds.has(a.id),
         outcome: outcomeByAsk.get(a.id) ?? null,
+        demo: a.inbox_message_id.startsWith("demo-"),
+        actionStatus: action?.status ?? null,
       };
     });
     ledger.hoursProtected = Math.round(ledger.hoursProtected * 10) / 10;
 
-    // Pending approval (single most recent, unexpired).
+    // Pending approvals: the newest live one and the newest demo one, never mixed (demo asks have
+    // inbox ids "demo-%"; sendBrief never puts demo and live drafts in one approval).
     let pending: PendingApprovalView | null = null;
-    const [ap] = await sql<{ id: string; code: string; draft_ids: string[] | null; expires_at: Date | null; created_at: Date }[]>`
+    let pendingDemo: PendingApprovalView | null = null;
+    const aps = await sql<{ id: string; code: string; draft_ids: string[] | null; expires_at: Date | null; created_at: Date }[]>`
       select id, code, draft_ids, expires_at, created_at from approvals
       where status = 'pending' and (expires_at is null or expires_at > now())
-      order by created_at desc limit 1`;
-    if (ap) {
+      order by created_at desc limit 10`;
+    for (const ap of aps) {
+      if (pending && pendingDemo) break;
       const ids = Array.isArray(ap.draft_ids) ? ap.draft_ids : [];
       const rows = ids.length
-        ? await sql<{ id: string; to_email: string; kind: string; body: string; subject: string | null; title: string | null }[]>`
-            select d.id, d.to_email, d.kind, d.body, a.subject, a.parsed->>'title' as title
+        ? await sql<{ id: string; to_email: string; kind: string; body: string; subject: string | null; title: string | null; demo: boolean }[]>`
+            select d.id, d.to_email, d.kind, d.body, a.subject, a.parsed->>'title' as title,
+                   coalesce(a.inbox_message_id like 'demo-%', false) as demo
             from drafts d left join asks a on a.id = d.ask_id
             where d.id in ${sql(ids)} order by d.id asc`
         : [];
-      pending = {
+      const isDemo = rows.length > 0 && rows.every((r) => r.demo);
+      if (isDemo ? pendingDemo : pending) continue;
+      const view: PendingApprovalView = {
         id: ap.id,
         code: ap.code,
         expiresAt: ap.expires_at ? iso(ap.expires_at) : null,
@@ -277,6 +289,8 @@ export async function buildDesk(): Promise<DeskData> {
           body: r.body,
         })),
       };
+      if (isDemo) pendingDemo = view;
+      else pending = view;
     }
 
     const outcomeRows = await sql<
@@ -307,6 +321,7 @@ export async function buildDesk(): Promise<DeskData> {
       boundaries: boundaryRows,
       ledger,
       pending,
+      pendingDemo,
       asks: cards,
       outcomes,
       checkinsSent: Number(checkinsSent) || 0,

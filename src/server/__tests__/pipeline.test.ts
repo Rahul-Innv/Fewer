@@ -103,3 +103,14 @@ describe("weekKey / isEveningOut", () => {
     expect(isEveningOut({ inPerson: true }, TZ)).toBe(false);
   });
 });
+
+describe("copy-only Desk asks (no sender email)", () => {
+  it("hand the parser a non-deliverable placeholder sender, never an empty string", async () => {
+    const { senderForModel, NO_SENDER } = await import("../pipeline");
+    expect(senderForModel("")).toBe(NO_SENDER);
+    expect(senderForModel(null)).toBe(NO_SENDER);
+    expect(senderForModel("not an email")).toBe(NO_SENDER);
+    expect(NO_SENDER.length).toBeGreaterThanOrEqual(3);
+    expect(senderForModel("sam@example.com")).toBe("sam@example.com");
+  });
+});

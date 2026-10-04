@@ -27,7 +27,8 @@ export type DraftView = {
 };
 
 /** "ready": approved, but the draft has no email address, so nothing was sent; the owner copies it from the Desk. */
-export type CardStatus = "awaiting" | "sent" | "ready" | "held" | "blocked" | "working" | "error";
+/** "simulated": a demo ask was approved; Fewer shows what it would send and emails nothing. */
+export type CardStatus = "awaiting" | "sent" | "ready" | "simulated" | "held" | "blocked" | "working" | "error";
 
 export type OutcomeView = {
   rating: number;
@@ -64,6 +65,10 @@ export type AskCardData = {
   sentAt: string | null;
   checkinSent: boolean;
   outcome: OutcomeView | null;
+  /** true for asks inserted by Run demo (nothing is ever emailed for them). Optional until the API sends it. */
+  demo?: boolean;
+  /** Latest action status when the API sends it (e.g. "sent", "ready", "simulated"). */
+  actionStatus?: string | null;
 };
 
 export type JourneyView = { id: string; rank: number; title: string };
@@ -84,14 +89,16 @@ export type PendingApprovalView = {
   code: string;
   expiresAt: string | null;
   createdAt: string;
-  drafts: { id: string; to: string; kind: string; askTitle: string; body: string }[];
+  drafts: { id: string; to: string; kind: string; askTitle: string; body: string; demo?: boolean }[];
+  /** true when every draft in the brief belongs to a demo ask. Optional until the API sends it. */
+  demo?: boolean;
 };
 
 /**
  * JSON shape of POST /api/approve: approveByCode's result, or an API error body.
  * `reason` is one of approveByCode's exact strings (see refusalCopy in ApprovalBanner.tsx) or "sent N" / "sent N, M failed".
  */
-export type ApproveResponse = { ok: boolean; reason?: string; sent?: number; error?: string };
+export type ApproveResponse = { ok: boolean; reason?: string; sent?: number; simulated?: number; error?: string };
 
 /** JSON shape of POST /api/decline. */
 export type DeclineResponse = { ok: boolean; error?: string };
@@ -120,6 +127,8 @@ export type DeskData = {
   boundaries: BoundaryView[];
   ledger: LedgerView;
   pending: PendingApprovalView | null;
+  /** The newest pending DEMO approval (Run demo). Never mixed with live drafts. */
+  pendingDemo?: PendingApprovalView | null;
   asks: AskCardData[];
   outcomes: OutcomeRowView[];
   /** Count of check-ins sent so far (the demo time-skip or real ones). */
