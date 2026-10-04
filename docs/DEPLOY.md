@@ -73,7 +73,8 @@ grep -E '^[A-Za-z_][A-Za-z0-9_]*=.+' .env.local | fly secrets import
 Check `FEWER_ALLOW_SEND` is not `false` unless you want the Fly copy to dry-run outbound mail.
 
 Then add the Desk password. **Do not put `DESK_PASSWORD` in `.env.local`**: Next would load it locally
-and gate your recording session. The gate is a no-op whenever it is unset.
+and gate your recording session. Unset in development, the gate is a no-op. Unset in production, the
+Desk is locked: every route answers `503` until you set it.
 
 ```powershell
 $b = New-Object byte[] 18; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b)
@@ -127,12 +128,16 @@ The ask should appear on the Desk and the brief should arrive from the Fly worke
 - `DESK_PASSWORD` set: every page and `/api/*` route needs a signed cookie, except `/login`,
   `/api/login`, `/_next/static`, `/_next/image` and `/favicon.ico`. Pages redirect to `/login`;
   `/api/*` answers `401 {"ok":false,"error":"Sign in required."}`.
-- `DESK_PASSWORD` unset: complete no-op (local dev, recording).
+- `DESK_PASSWORD` unset in development: complete no-op (local dev, recording).
+- `DESK_PASSWORD` unset in production: fails closed. Every route answers
+  `503 {"ok":false,"error":"The Desk is locked: ..."}`, unless `DESK_GATE=off` is set on purpose.
 - Cookie `fewer_desk`: expiry plus HMAC-SHA256 signed with `DESK_PASSWORD`; HttpOnly, SameSite=Lax,
   Secure in production, 12 hours, enforced server-side. Changing `DESK_PASSWORD` logs everyone out.
 - After 12 hours an open Desk tab's polling gets 401s; reload the page to sign in again.
-- Judges need the password. To open the Desk to anyone instead: `fly secrets unset DESK_PASSWORD`
-  (machines restart; this removes the gate entirely, including for `/api/chat` and the approve buttons).
+- Judges need the password. Unsetting it does not open the Desk; it locks it (see above).
+- Opening the Desk to anyone (`fly secrets unset DESK_PASSWORD` plus `fly secrets set DESK_GATE=off`)
+  is not recommended. It removes the gate from every route, including `/api/chat`, `/api/asks` and the
+  approve buttons, so anyone could have the agent's inbox send a drafted email to any address.
 - `fly.toml`'s health check polls `/login`, the one route the gate leaves open.
 
 ## Rollback and pause

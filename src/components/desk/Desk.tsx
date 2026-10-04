@@ -10,6 +10,7 @@ import { BoundariesPanel, JourneysPanel, OutcomesPanel, WeekLedger } from "./Lef
 import { ProactivePanel } from "./ProactivePanel";
 import { VerdictCard } from "./VerdictCard";
 import { AskComposer } from "./AskComposer";
+import { AgentNow } from "./AgentNow";
 import { ChatDrawer } from "../chat/ChatDrawer";
 import { clockTime, plural } from "./format";
 
@@ -253,19 +254,18 @@ export function Desk({ initialInbox, ownerName }: { initialInbox: string | null;
         </div>
       </header>
 
-      <p className="mt-3 flex items-center gap-2 text-[12.5px] text-muted" role="status">
-        <span
-          aria-hidden
-          className={`inline-block size-2 rounded-full ${offline ? "bg-smaller-accent" : "bg-yes-accent"}`}
-        />
-        {offline
-          ? desk
-            ? "Live updates paused."
-            : "Reconnecting to the Desk…"
-          : isFirstPaint
-            ? "Loading the Desk…"
-            : `Live for ${owner}. Updates every few seconds.`}
-      </p>
+      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+        <AgentNow desk={desk} offline={offline} />
+        <p className="text-[12.5px] text-muted">
+          {offline
+            ? desk
+              ? "Live updates paused."
+              : "Reconnecting to the Desk…"
+            : isFirstPaint
+              ? "Loading the Desk…"
+              : `Live for ${owner}. Updates every few seconds.`}
+        </p>
+      </div>
 
       {offline && desk ? (
         <p role="status" className="mt-3 rounded-lg bg-warn-bg px-3.5 py-2 text-[13px] text-warn-fg">
@@ -280,13 +280,20 @@ export function Desk({ initialInbox, ownerName }: { initialInbox: string | null;
         </p>
       ) : null}
 
-      <ApprovalBanner className="mt-5" pending={desk?.pending ?? null} approver={desk?.approver ?? null} timeZone={tz} onChanged={load} />
+      <ApprovalBanner
+        className="mt-5"
+        pending={desk?.pending ?? null}
+        approver={desk?.approver ?? null}
+        timeZone={tz}
+        onChanged={load}
+        verdictByDraft={Object.fromEntries(asks.flatMap((a) => (a.draft ? [[a.draft.id, a.verdict]] : [])))}
+      />
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[300px_minmax(0,1fr)]">
         {/* ---------- left: this week ---------- */}
         <aside aria-label="This week" className="order-2 space-y-4 lg:order-1 lg:sticky lg:top-6 lg:self-start">
           <h2 className="font-serif text-[26px] leading-none text-ink">This week</h2>
-          <WeekLedger ledger={desk?.ledger ?? { yes: 0, wildcard: 0, smaller: 0, no: 0, askOne: 0, blocked: 0, hoursProtected: 0 }} />
+          <WeekLedger ledger={desk?.ledger ?? null} />
           <JourneysPanel journeys={desk?.journeys ?? []} />
           <BoundariesPanel boundaries={desk?.boundaries ?? []} />
           <OutcomesPanel outcomes={desk?.outcomes ?? []} />

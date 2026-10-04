@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { X, ArrowUp, Square, Sparkles } from "lucide-react";
+import { X, ArrowUp, Square, Sparkles, TriangleAlert } from "lucide-react";
 import {
   AssistantRuntimeProvider,
   AuiIf,
@@ -11,6 +11,7 @@ import {
   ThreadPrimitive,
 } from "@assistant-ui/react";
 import { AssistantChatTransport, useChatRuntime } from "@assistant-ui/react-ai-sdk";
+import { AgentStatus } from "@/components/assistant-ui/elements/agent-status";
 
 const SUGGESTIONS = [
   "Why did you say no to the panel?",
@@ -34,8 +35,12 @@ function AssistantMessage() {
       <div className="max-w-[92%] whitespace-pre-wrap rounded-2xl rounded-bl-md border border-line bg-surface px-3.5 py-2 text-[14px] leading-relaxed text-ink">
         <MessagePrimitive.Parts />
         <MessagePrimitive.Error>
-          <ErrorPrimitive.Root className="mt-1 rounded-md bg-blocked-bg px-2.5 py-1.5 text-[13px] text-blocked-fg">
-            <ErrorPrimitive.Message />
+          <ErrorPrimitive.Root className="mt-1 flex items-start gap-2 rounded-md bg-warn-bg px-2.5 py-1.5 text-[13px] text-warn-fg">
+            <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
+            <span>
+              <ErrorPrimitive.Message />
+              <span className="block">The Desk still works.</span>
+            </span>
           </ErrorPrimitive.Root>
         </MessagePrimitive.Error>
       </div>
@@ -71,9 +76,9 @@ function Thread() {
           {({ message }) => (message.role === "user" ? <UserMessage /> : <AssistantMessage />)}
         </ThreadPrimitive.Messages>
         <AuiIf condition={(s) => s.thread.isRunning}>
-          <p role="status" className="px-1 text-[12.5px] text-muted">
-            Fewer is thinking…
-          </p>
+          <div role="status" className="px-1">
+            <AgentStatus state="working" label="Reading the Desk" trailing={null} />
+          </div>
         </AuiIf>
       </ThreadPrimitive.Viewport>
 

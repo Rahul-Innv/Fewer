@@ -3,29 +3,21 @@
 import { useId, useState } from "react";
 import {
   BadgeCheck,
+  Check,
   ChevronDown,
+  Copy,
   CircleHelp,
-  Clock,
   HandHelping,
-  Hourglass,
+  Info,
   Mail,
-  PauseCircle,
   Send,
-  ShieldAlert,
   TriangleAlert,
 } from "lucide-react";
-import type { AskCardData, CardStatus, FitLine } from "./types";
+import type { AskCardData, FitLine } from "./types";
 import { RULE_NAMES, VERDICTS, ruleShortName } from "./tokens";
 import { clockTime, formatHours, relativeTime, savedHoursForSmaller, whenLabel } from "./format";
-
-const STATUS_STYLE: Record<CardStatus, { icon: React.ComponentType<{ className?: string; "aria-hidden"?: boolean }>; cls: string }> = {
-  awaiting: { icon: Hourglass, cls: "bg-askone-bg text-askone-fg" },
-  sent: { icon: BadgeCheck, cls: "bg-yes-bg text-yes-fg" },
-  held: { icon: PauseCircle, cls: "bg-no-bg text-no-fg" },
-  blocked: { icon: ShieldAlert, cls: "bg-blocked-bg text-blocked-fg" },
-  working: { icon: Clock, cls: "bg-paper text-muted border border-line" },
-  error: { icon: TriangleAlert, cls: "bg-warn-bg text-warn-fg" },
-};
+import { ReadingPlan, StageRail } from "./AskStages";
+import { draftHasNoAddress, isReadyToCopy } from "./stages";
 
 /** End a sentence with a period unless it already ends in punctuation. */
 function sentence(text: string): string {
@@ -159,6 +151,29 @@ function EvidenceChips({ card }: { card: AskCardData }) {
   );
 }
 
+/** Copies the reply body. Visible label, lucide Copy icon; falls back to a hint when the clipboard is blocked. */
+function CopyReply({ text }: { text: string }) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(text);
+          setState("copied");
+        } catch {
+          setState("failed");
+        }
+        setTimeout(() => setState("idle"), 1800);
+      }}
+      className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-action px-3 text-[13px] font-semibold text-action-ink transition-transform duration-100 hover:bg-black active:scale-[0.97] motion-reduce:transition-none"
+    >
+      {state === "copied" ? <Check aria-hidden className="size-4" /> : <Copy aria-hidden className="size-4" />}
+      <span aria-live="polite">{state === "copied" ? "Copied" : state === "failed" ? "Select the text to copy" : "Copy reply"}</span>
+    </button>
+  );
+}
+
 export function VerdictCard({ card, timeZone, isNew }: { card: AskCardData; timeZone: string; isNew: boolean }) {
   const [open, setOpen] = useState(false);
   // Was a verdict already on this card when it first rendered? Decides when the landing animation waits for card-in.
@@ -166,13 +181,13 @@ export function VerdictCard({ card, timeZone, isNew }: { card: AskCardData; time
   const draftId = useId();
   const titleId = useId();
   const v = card.verdict ? VERDICTS[card.verdict] : null;
-  const st = STATUS_STYLE[card.status];
-  const StatusIcon = st.icon;
   const when = whenLabel(card.startsAt, card.durationMin, timeZone);
   const sender = card.fromName ? `${card.fromName} <${card.from}>` : card.from;
   const ruleName = card.rule ? (RULE_NAMES[card.rule] ?? null) : null;
   const ruleShort = ruleShortName(card.rule);
   const why = whyFor(card, ruleName);
+  const readyToCopy = isReadyToCopy(card);
+  const noAddress = draftHasNoAddress(card);
   // "The verdict lands": plays once, for a card that arrives with a verdict (isNew) or when a verdict arrives on a card already shown.
   const landing = card.verdict !== null && (isNew || !hadVerdictAtMount);
   const landStyle = { "--land-lead": hadVerdictAtMount ? "380ms" : "0ms" } as React.CSSProperties;
@@ -242,9 +257,9 @@ export function VerdictCard({ card, timeZone, isNew }: { card: AskCardData; time
             {card.title}
           </h3>
           {sender ? (
-            <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[13px] text-muted">
-              <Mail aria-hidden className="size-3.5" />
-              <span className="break-all">{sender}</span>
+            <p className="mt-0.5 flex items-start gap-x-1.5 text-[13px] text-muted">
+              <Mail aria-hidden className="mt-[3px] size-3.5 shrink-0" />
+              <span className="min-w-0 break-words">{sender}</span>
             </p>
           ) : null}
           {when || card.inPerson != null ? (
@@ -255,6 +270,8 @@ export function VerdictCard({ card, timeZone, isNew }: { card: AskCardData; time
             </p>
           ) : null}
         </div>
+
+        {!card.verdict && card.status === "working" ? <ReadingPlan card={card} /> : null}
 
         {card.verdict ? (
           <div className="mt-4 grid gap-4 border-t border-line pt-4 md:grid-cols-2">
@@ -312,7 +329,19 @@ export function VerdictCard({ card, timeZone, isNew }: { card: AskCardData; time
         <CostBar card={card} />
         {card.verdict && card.verdict !== "BLOCKED" ? <EvidenceChips card={card} /> : null}
 
-        {card.draft ? (
+        {card.draft && readyToCopy ? (
+          <section aria-label="Reply ready to copy" className="mt-4 rounded-lg border border-yes-accent/40 bg-yes-bg/40 px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-[13px] font-semibold text-ink">Reply ready to copy</p>
+              <CopyReply text={card.draft.body} />
+            </div>
+            <p className="mt-2 whitespace-pre-wrap text-[13.5px] leading-relaxed text-ink">{card.draft.body}</p>
+            <p className="mt-2 flex items-start gap-1.5 text-[12.5px] text-muted">
+              <Info aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+              Fewer did not send this. Copy it and send it yourself.
+            </p>
+          </section>
+        ) : card.draft ? (
           <div className="mt-4">
             <button
               type="button"
@@ -326,7 +355,9 @@ export function VerdictCard({ card, timeZone, isNew }: { card: AskCardData; time
                 className={`size-4 text-muted transition-transform group-hover:text-focus ${open ? "rotate-0" : "-rotate-90"}`}
               />
               Draft reply
-              <span className="font-normal text-muted">to {card.draft.to}</span>
+              <span className="font-normal text-muted">
+                {noAddress ? "· no email address, you copy it after your yes" : `to ${card.draft.to}`}
+              </span>
             </button>
             {open ? (
               <div id={draftId} className="mt-1.5 rounded-lg border border-line bg-paper px-4 py-3">
@@ -337,15 +368,11 @@ export function VerdictCard({ card, timeZone, isNew }: { card: AskCardData; time
         ) : null}
       </div>
 
-      {hideFooter ? null : (
-        <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-line bg-paper/60 px-4 py-2.5 sm:px-5">
-          <p className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12.5px] font-medium ${st.cls}`}>
-            <StatusIcon aria-hidden className="size-3.5" />
-            {card.statusLabel}
-            {card.status === "sent" && card.sentAt ? (
-              <span className="font-normal tabular"> · {clockTime(card.sentAt, timeZone)}</span>
-            ) : null}
-          </p>
+      {hideFooter || !card.verdict ? null : (
+        <footer className="flex flex-col gap-2 border-t border-line bg-paper/60 px-4 py-3 sm:px-5">
+          <div className="flex items-center gap-3">
+            <StageRail card={card} sentTime={card.sentAt ? clockTime(card.sentAt, timeZone) : null} />
+          </div>
           {card.outcome ? (
             <p className="text-[13px] text-ink">
               <Send aria-hidden className="mr-1 inline size-3.5 text-muted" />
@@ -353,9 +380,7 @@ export function VerdictCard({ card, timeZone, isNew }: { card: AskCardData; time
               {card.outcome.note ? <span className="text-muted"> — “{card.outcome.note}”</span> : null}
             </p>
           ) : card.checkinSent ? (
-            <p className="text-[13px] text-muted">
-              Check-in sent. Waiting for a 1–5.
-            </p>
+            <p className="text-[13px] text-muted">Check-in sent. Waiting for a 1–5.</p>
           ) : null}
         </footer>
       )}

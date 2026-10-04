@@ -15,7 +15,8 @@
     "smoke": "tsx scripts/smoke.ts",
     "studio": "mastra dev --dir src/mastra",
     "setup:inboxes": "tsx scripts/setup-inboxes.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "demo:prep": "tsx scripts/demo-prep.ts"
   },
   "dependencies": {
     "@assistant-ui/react": "^0.15.23",

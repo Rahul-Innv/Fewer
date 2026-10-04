@@ -88,7 +88,7 @@ function statusFor(ask: AskRow, verdict: Verdict | null, sentAt: string | null):
     case "sent":
       return { status: "sent", label: "Sent" };
     case "ready":
-      return { status: "sent", label: "Approved. Ready to copy; Fewer sent nothing." };
+      return { status: "ready", label: "Approved. Ready to copy; Fewer sent nothing." };
     case "awaiting_approval":
       return { status: "awaiting", label: "Awaiting your yes" };
     case "declined":
