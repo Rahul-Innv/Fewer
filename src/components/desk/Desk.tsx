@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowRight, Check, Copy, FlaskConical, Loader2, MessageSquareText, TriangleAlert } from "lucide-react";
+import { ArrowRight, Check, Copy, FlaskConical, Loader2, TriangleAlert } from "lucide-react";
 import type { DeskData } from "./types";
 import type { Verdict } from "@/core/contracts";
 import { VERDICTS } from "./tokens";
@@ -395,16 +395,6 @@ export function Desk({ initialInbox, ownerName }: { initialInbox: string | null;
         </div>
         <div className="flex flex-wrap items-start gap-2">
           <EmailPlanButton scope={scope} onToast={setToast} />
-          <button
-            type="button"
-            onClick={() => setChatOpen((o) => !o)}
-            aria-expanded={chatOpen}
-            aria-controls="ask-fewer-drawer"
-            className="inline-flex h-11 items-center gap-2 rounded-xl bg-action px-4 text-[14px] font-semibold text-action-ink transition-transform duration-100 hover:bg-black active:scale-[0.97] motion-reduce:transition-none"
-          >
-            <MessageSquareText aria-hidden className="size-4" />
-            Ask Fewer
-          </button>
         </div>
       </header>
 

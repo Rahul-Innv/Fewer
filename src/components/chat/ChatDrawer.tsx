@@ -204,9 +204,10 @@ export function ChatLauncher({ open, onToggle }: { open: boolean; onToggle: () =
       aria-label={open ? "Close Ask Fewer" : "Ask Fewer"}
       aria-expanded={open}
       aria-controls="ask-fewer-drawer"
+      title="Ask Fewer"
       className="fixed bottom-[calc(24px+env(safe-area-inset-bottom))] right-[calc(24px+env(safe-area-inset-right))] z-50 inline-flex items-center gap-2 rounded-full transition-transform duration-100 active:scale-[0.96] motion-reduce:transition-none"
     >
-      <span className="hidden rounded-full border border-line-strong bg-surface px-3.5 py-2 text-[14px] font-semibold text-ink shadow-[0_8px_24px_-12px_rgba(27,31,35,0.45)] sm:inline">
+      <span className="hidden rounded-full border border-line-strong bg-surface px-3.5 py-2 text-[14px] font-semibold text-ink shadow-[0_8px_24px_-12px_rgba(27,31,35,0.45)] 2xl:inline">
         Ask Fewer
       </span>
       <span className="grid size-14 place-items-center rounded-full bg-action text-action-ink shadow-[0_12px_32px_-12px_rgba(27,31,35,0.7)] hover:bg-black">

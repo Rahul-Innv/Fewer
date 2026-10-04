@@ -58,6 +58,30 @@ export function ResetDemoButton({ onDone, onToast }: { onDone: () => void; onToa
   const [busy, setBusy] = useState(false);
   const [hidden, setHidden] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const [demoRunning, setDemoRunning] = useState(false);
+
+  // A reset mid-run would delete asks as they land: watch GET /api/demo/run while this button is on screen.
+  useEffect(() => {
+    if (!available) return;
+    let stopped = false;
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const tick = async () => {
+      try {
+        const res = await fetch("/api/demo/run", { cache: "no-store" });
+        const d = (await res.json().catch(() => ({}))) as { inserted?: unknown; total?: unknown };
+        if (!stopped) setDemoRunning(typeof d.inserted === "number" && typeof d.total === "number" && d.inserted < d.total);
+      } catch {
+        /* keep the last known state */
+      }
+      if (!stopped) t = setTimeout(tick, 2000);
+    };
+    void tick();
+    return () => {
+      stopped = true;
+      if (t) clearTimeout(t);
+    };
+  }, [available]);
+
   if (!available || hidden) return null;
 
   async function reset() {
@@ -76,9 +100,16 @@ export function ResetDemoButton({ onDone, onToast }: { onDone: () => void; onToa
 
   return (
     <div className="flex flex-col items-end gap-2">
-      <button type="button" onClick={reset} disabled={busy} className={secondaryBtn}>
+      <button
+        type="button"
+        onClick={reset}
+        disabled={busy || demoRunning}
+        title={demoRunning ? "Wait for the demo to finish" : undefined}
+        className={secondaryBtn}
+      >
         {busy ? <Loader2 aria-hidden className="size-4 animate-spin motion-reduce:animate-none" /> : <RotateCcw aria-hidden className="size-4" />}
         Reset demo
+        {demoRunning ? <span className="sr-only"> (wait for the demo to finish)</span> : null}
       </button>
       {problem ? <Callout text={problem} onClose={() => setProblem(null)} /> : null}
     </div>
@@ -140,6 +171,8 @@ export function LiveControls({ onChanged, onToast }: { onChanged: () => void; on
         }
         seen.current = -1;
         setProgress(null);
+        // Idle: keep an eye out for an import started elsewhere, so Reset live can't run over it.
+        t = setTimeout(tick, 3000);
       }
     };
     t = setTimeout(tick, runId === 0 ? 0 : 1500);
@@ -205,9 +238,16 @@ export function LiveControls({ onChanged, onToast }: { onChanged: () => void; on
           </span>
         ) : null}
         {showReset ? (
-          <button type="button" onClick={() => setConfirming(true)} disabled={busy !== null || running} className={secondaryBtn}>
+          <button
+            type="button"
+            onClick={() => setConfirming(true)}
+            disabled={busy !== null || running}
+            title={running ? "Wait for the import to finish" : undefined}
+            className={secondaryBtn}
+          >
             <RotateCcw aria-hidden className="size-4" />
             Reset live
+            {running ? <span className="sr-only"> (wait for the import to finish)</span> : null}
           </button>
         ) : null}
         {showImport ? (
