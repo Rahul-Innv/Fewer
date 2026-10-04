@@ -1,3 +1,4 @@
+import { isJsonRequest } from "../_lib/http";
 import { NextResponse } from "next/server";
 import { SESSION_COOKIE, SESSION_TTL_SECONDS, deskPassword, issueSession, passwordMatches } from "../../login/gate";
 
@@ -22,7 +23,7 @@ export async function POST(req: Request) {
   if (!secret) return reply({ ok: true, gate: "off" });
 
   // Same cheap CSRF guard as the Desk routes: a cross-site HTML form cannot send application/json.
-  if (!(req.headers.get("content-type") ?? "").toLowerCase().includes("application/json")) {
+  if (!isJsonRequest(req)) {
     return reply({ ok: false, error: "Send application/json." }, 415);
   }
 

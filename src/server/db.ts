@@ -244,7 +244,7 @@ export async function committedAsks(
     join lateral (
       select verdict from decisions x where x.ask_id = a.id order by x.id desc limit 1
     ) d on true
-    where a.status in ('triaged', 'awaiting_approval', 'sent')
+    where a.status in ('triaged', 'awaiting_approval', 'sent', 'ready')
       and d.verdict in ${sql(verdicts)}
       and a.id <> ${excludeAskId}`;
 }
@@ -381,8 +381,10 @@ export async function expireStaleApprovals(): Promise<number> {
 export async function claimAction(approvalId: string, draftId: string): Promise<boolean> {
   const rows = await sql`
     insert into actions (approval_id, draft_id, status) values (${approvalId}, ${draftId}, 'sending')
-    on conflict (approval_id, draft_id) do nothing
+    on conflict do nothing
     returning id`;
+  // No target: also yields to actions_one_live_per_draft, so a draft with a live (sending/sent/ready)
+  // action under ANY approval is never claimed again, even across processes (Desk + Fly worker).
   return rows.length > 0;
 }
 

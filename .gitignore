@@ -42,3 +42,5 @@ private/
 .claude/skills/
 .claude/settings.local.json
 .neon
+*.key
+*.pem

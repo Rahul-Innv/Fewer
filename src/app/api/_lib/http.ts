@@ -15,9 +15,14 @@ export function jsonError(status: number, error: string, extra: Record<string, u
  * Cheap CSRF guard for state-changing routes: a cross-site HTML form cannot send
  * `Content-Type: application/json` without a CORS preflight, which we never answer.
  */
+export function isJsonRequest(req: Request): boolean {
+  // Exact media-type essence: "text/plain; application/json" (CORS-safelisted, no preflight) must fail.
+  const essence = (req.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
+  return essence === "application/json";
+}
+
 export function requireJson(req: Request): Response | null {
-  const type = req.headers.get("content-type") ?? "";
-  if (!type.toLowerCase().includes("application/json")) {
+  if (!isJsonRequest(req)) {
     return jsonError(415, "Send application/json.");
   }
   return null;

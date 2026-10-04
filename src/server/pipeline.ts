@@ -187,7 +187,16 @@ async function notifyApprover(
 // handleInbound
 // ---------------------------------------------------------------------------
 
-export async function handleInbound(inboxId: string, messageId: string): Promise<void> {
+/**
+ * Routes one inbound email. Intake (fetch, routing, approval/check-in replies, inserting the ask) is
+ * awaited so a failure rejects and the inbox listener retries the message. Pass opts.background to
+ * run the slow triage detached (the worker does); otherwise triage is awaited too.
+ */
+export async function handleInbound(
+  inboxId: string,
+  messageId: string,
+  opts: { background?: (triageTask: Promise<void>) => void } = {},
+): Promise<void> {
   const c = cfg();
   const msg = await mail.getMessage(inboxId, messageId);
 
@@ -248,7 +257,8 @@ export async function handleInbound(inboxId: string, messageId: string): Promise
   }
   await db.logEvent("received", askId, { from: normalizeEmail(msg.from), subject: msg.subject });
   log(`ask ${askId} received from ${normalizeEmail(msg.from)}`);
-  await triage(askId);
+  if (opts.background) opts.background(triage(askId));
+  else await triage(askId);
 }
 
 async function handleApprovalReply(msg: InboundMessage, approval: db.ApprovalRow): Promise<void> {

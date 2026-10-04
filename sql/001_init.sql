@@ -109,3 +109,7 @@ create index if not exists decisions_ask_idx on decisions (ask_id);
 create index if not exists drafts_ask_idx on drafts (ask_id);
 create index if not exists events_log_kind_idx on events_log (kind);
 create index if not exists checkins_thread_idx on checkins (thread_id);
+
+-- One live send per draft across ALL approvals (two processes can brief the same draft; only one may send).
+create unique index if not exists actions_one_live_per_draft
+  on actions (draft_id) where status in ('sending', 'sent', 'ready');

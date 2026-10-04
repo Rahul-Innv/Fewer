@@ -46,23 +46,30 @@ async function main() {
     timer = setTimeout(() => void fireBrief(), BRIEF_DEBOUNCE_MS);
   };
 
-  // listenInbox serialises awaited handlers; triage can take ~30s (LLM + Exa), so kick it off and
-  // return at once. Asks in a burst are then triaged in parallel and still land in ONE brief.
+  // listenInbox serialises awaited handlers. Intake is awaited (a failure rejects, so listenInbox
+  // retries the message); only the slow triage (~30s, LLM + Exa) runs detached, so a burst of asks is
+  // triaged in parallel and still lands in ONE debounced brief.
   const handle = async (m: { inboxId: string; messageId: string }): Promise<void> => {
-    inflight += 1;
     log(`inbound ${m.messageId}`);
-    void (async () => {
-      try {
-        await pipeline.handleInbound(m.inboxId, m.messageId);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        log(`handleInbound failed: ${msg}`);
-        await db.logEvent("error", null, { stage: "inbound", messageId: m.messageId, error: msg });
-      } finally {
-        inflight -= 1;
-        scheduleBrief(); // debounced: a burst of asks yields ONE brief
-      }
-    })();
+    try {
+      await pipeline.handleInbound(m.inboxId, m.messageId, {
+        background: (task) => {
+          inflight += 1;
+          void task
+            .catch((e) => log(`triage failed: ${e instanceof Error ? e.message : String(e)}`))
+            .finally(() => {
+              inflight -= 1;
+              scheduleBrief(); // debounced: a burst of asks yields ONE brief
+            });
+        },
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      log(`intake failed (will retry): ${msg}`);
+      await db.logEvent("error", null, { stage: "inbound", messageId: m.messageId, error: msg });
+      throw e;
+    }
+    scheduleBrief();
   };
 
   // Pick up asks stranded at 'received' by a previous crash.

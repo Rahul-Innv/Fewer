@@ -176,6 +176,8 @@ export async function addLabels(inboxId: string, messageId: string, labels: stri
 type Ref = { inboxId: string; messageId: string; threadId: string };
 
 const POLL_MS = 5_000;
+const PROCESSED_LABEL = "fewer-processed";
+const REPLAY_WINDOW_MS = 30 * 60_000;
 const MAX_ATTEMPTS = 3;
 const SKIP_LABELS = new Set(["sent", "draft", "spam", "blocked", "unauthenticated", "trash"]);
 
@@ -203,8 +205,10 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 
 /**
  * Subscribe to message.received on one inbox via WebSocket (reconnect with backoff, resubscribe on
- * every connection) AND poll messages.list every 5s as a fallback. Dedupes by messageId; messages
- * that already exist when listening starts are never delivered (first list call seeds the seen-set).
+ * every connection) AND poll messages.list every 5s as a fallback. Dedupes by messageId. On start,
+ * inbound messages from the last REPLAY_WINDOW_MS without the "fewer-processed" label are replayed
+ * (they arrived while the worker was down); older or already-processed ones are skipped. Replay is
+ * safe: asks dedupe on inbox_message_id, approval codes are single-use, check-ins are gated.
  * onMessage calls are serialized. A handler that throws is retried (next poll) up to 3 times.
  * Never subscribes to spam / blocked / unauthenticated events.
  */
@@ -235,6 +239,8 @@ export function listenInbox(
       try {
         await onMessage(ref);
         attempts.delete(ref.messageId);
+        // Durable marker so a restart never re-delivers this message.
+        void addLabels(inboxId, ref.messageId, [PROCESSED_LABEL]).catch(() => {});
       } catch (err) {
         const n = (attempts.get(ref.messageId) ?? 0) + 1;
         attempts.set(ref.messageId, n);
@@ -252,10 +258,18 @@ export function listenInbox(
         const res = await client.inboxes.messages.list(inboxId, { limit: seeded ? 25 : 100 });
         const items = res.messages ?? [];
         if (!seeded) {
-          for (const it of items) seen.add(it.messageId);
+          const cutoff = Date.now() - REPLAY_WINDOW_MS;
+          let replay = 0;
+          for (const it of items) {
+            const recent = new Date(it.timestamp).getTime() >= cutoff;
+            const done = it.labels?.some((l) => l.toLowerCase() === PROCESSED_LABEL);
+            if (recent && !done && isInbound(it.labels, it.from)) replay += 1;
+            else seen.add(it.messageId);
+          }
           seeded = true;
-          console.log(`[mail] poll seeded with ${items.length} existing message(s) for ${inboxId}`);
-        } else {
+          console.log(`[mail] poll seeded with ${items.length} existing message(s) for ${inboxId}; replaying ${replay} unprocessed from the last ${REPLAY_WINDOW_MS / 60_000} min`);
+        }
+        {
           const fresh = items
             .filter((it) => !seen.has(it.messageId) && isInbound(it.labels, it.from))
             .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
