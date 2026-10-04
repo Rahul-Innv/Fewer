@@ -136,12 +136,26 @@ export const RatingSchema = z.object({
 });
 export type Rating = z.infer<typeof RatingSchema>;
 
+/**
+ * Time the owner has already given away: a busy block from their calendar (times only, never titles)
+ * or an ask Fewer already accepted. An ask overlapping one clashes (rule R1).
+ */
+export const TakenBlockSchema = z.object({
+  start: IsoWithOffset,
+  end: IsoWithOffset,
+  /** "your calendar" for calendar blocks; the accepted ask's title otherwise. */
+  label: z.string(),
+  kind: z.enum(["calendar", "accepted"]),
+});
+export type TakenBlock = z.infer<typeof TakenBlockSchema>;
+
 export const DecisionContextSchema = z.object({
   now: IsoWithOffset,
   timeZone: z.string().refine(isValidTimeZone, "expected an IANA time zone, e.g. America/Los_Angeles"),
   eveningsOutThisWeek: z.number().int().min(0),
   wildcardUsedThisWeek: z.boolean(),
   ratings: z.array(RatingSchema),
+  takenBlocks: z.array(TakenBlockSchema).optional(),
 });
 export type DecisionContext = z.infer<typeof DecisionContextSchema>;
 

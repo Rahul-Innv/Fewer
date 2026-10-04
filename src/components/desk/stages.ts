@@ -39,7 +39,21 @@ export function isReadyToCopy(card: Pick<AskCardData, "verdict" | "status" | "dr
   return card.status === "sent" && draftHasNoAddress(card);
 }
 
-export function stagesFor(card: Pick<AskCardData, "verdict" | "status" | "evidence" | "draft"> & { statusLabel?: string }): StageModel {
+/** A demo ask whose approval was simulated: Fewer would send it, but nothing was emailed. Defensive about field names. */
+export function isSimulated(card: Partial<Pick<AskCardData, "status" | "statusLabel" | "demo" | "actionStatus">>): boolean {
+  if (card.status === "simulated" || card.actionStatus === "simulated") return true;
+  if (card.statusLabel && /simulat|would send|not emailed/i.test(card.statusLabel)) return true;
+  return card.demo === true && card.status === "sent";
+}
+
+export function stagesFor(
+  card: Pick<AskCardData, "verdict" | "status" | "evidence" | "draft"> &
+    Partial<Pick<AskCardData, "statusLabel" | "demo" | "actionStatus">>,
+): StageModel {
+  if (isSimulated(card)) {
+    const steps = [...STAGES.slice(0, 5), "Approved", "Review copy (demo)"];
+    return { steps, activeIndex: steps.length, tone: "stopped", current: card.statusLabel || "Would send · demo, not emailed" };
+  }
   if (isReadyToCopy({ statusLabel: "", ...card })) {
     const steps = [...STAGES.slice(0, 5), "Approved", "Ready to copy"];
     return { steps, activeIndex: steps.length, tone: "done", current: "Approved. Ready to copy. Nothing was sent." };
@@ -89,4 +103,41 @@ export function agentNow(desk: DeskData | null, offline: boolean): AgentNowModel
   if (drafting.length > 0) return { state: "working", label: `Drafting ${plural(drafting.length, "reply", "replies")}`, since: null };
   if (desk.pending) return { state: "waiting", label: "Waiting for your yes", since: desk.pending.createdAt };
   return { state: "working", label: "Listening for asks", since: null };
+}
+
+export type DemoStep = { step: 1 | 2 | 3 | 4 | 5 | 6; caption: string; demo: boolean };
+
+/** The whole loop, shown at the top in both tabs. Goals come first: every ask is checked against them. */
+export const FLOW_STEPS = ["Your goals", "Asks arrive", "Fewer decides", "You approve", "Replies", "Follow-up & learn"] as const;
+export const FLOW_STEP5_DEMO = "Review copy to your inbox";
+
+/** Where the Desk is in the loop, from /api/desk only. Drives the highlighted step and its caption. */
+export function demoStepFor(desk: Pick<DeskData, "asks" | "pending" | "checkinsSent"> | null): DemoStep {
+  const asks = desk?.asks ?? [];
+  const demo = asks.some((a) => a.demo === true) || desk?.pending?.demo === true;
+  const reading = asks.filter((a) => !a.verdict && a.status === "working").length;
+  const pendingN = desk?.pending?.drafts.length ?? 0;
+  const checkins = (desk?.checkinsSent ?? 0) > 0 || asks.some((a) => a.checkinSent);
+  const simulated = asks.filter((a) => isSimulated(a)).length;
+  const sent = asks.filter((a) => a.status === "sent" && !isSimulated(a)).length;
+  const decided = asks.filter((a) => a.verdict).length;
+  const of = (n: number, text: string) => `Step ${n} of 6: ${text}`;
+  if (asks.length === 0) return { step: 2, caption: of(2, "waiting for asks."), demo };
+  if (reading > 0) return { step: 2, caption: of(2, `reading ${plural(reading, "ask")}.`), demo };
+  if (pendingN > 0) {
+    const what = demo
+      ? `approve the demo (${plural(pendingN, "reply", "replies")}). Only your work inbox gets a copy.`
+      : `approve to send ${plural(pendingN, "reply", "replies")}.`;
+    return { step: 4, caption: of(4, what), demo };
+  }
+  if (checkins) return { step: 6, caption: of(6, "Fewer asks how each yes went."), demo };
+  if (simulated > 0)
+    return {
+      step: 5,
+      caption: of(5, `${plural(simulated, "reply", "replies")} approved. Only your work inbox got a copy. Nobody else was emailed.`),
+      demo,
+    };
+  if (sent > 0) return { step: 5, caption: of(5, `${plural(sent, "reply", "replies")} sent.`), demo };
+  if (decided > 0) return { step: 3, caption: of(3, `Fewer decided ${plural(decided, "ask")}.`), demo };
+  return { step: 2, caption: of(2, "asks arrive."), demo };
 }

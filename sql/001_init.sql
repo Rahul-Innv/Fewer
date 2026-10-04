@@ -116,3 +116,14 @@ create index if not exists checkins_thread_idx on checkins (thread_id);
 create unique index if not exists actions_one_live_per_draft_v2
   on actions (draft_id) where status in ('sending', 'sent', 'ready', 'simulated');
 drop index if exists actions_one_live_per_draft;
+
+-- The owner's calendar as busy TIMES ONLY (never titles, locations or attendees). Loaded via POST /api/calendar/busy;
+-- decide() treats an overlapping ask as a clash (rule R1).
+create table if not exists calendar_busy (
+  id bigserial primary key,
+  start_at timestamptz not null,
+  end_at timestamptz not null,
+  source text not null default 'google',
+  created_at timestamptz default now()
+);
+create index if not exists calendar_busy_start_idx on calendar_busy (start_at);

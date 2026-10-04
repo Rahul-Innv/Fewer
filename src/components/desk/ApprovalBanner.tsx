@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { BellRing, Hourglass, Mail } from "lucide-react";
+import { BellRing, ChevronRight, Hourglass, Mail } from "lucide-react";
 import { ApprovalCard, type ApprovalState } from "@/components/assistant-ui/elements/approval-card";
 import type { Verdict } from "@/core/contracts";
 import type { ApproveResponse, DeclineResponse, PendingApprovalView } from "./types";
@@ -89,9 +89,12 @@ function PendingBrief({
   timeZone,
   className,
   verdictByDraft,
+  demo = false,
 }: {
   pending: PendingApprovalView;
   verdictByDraft?: Record<string, Verdict | null | undefined>;
+  /** Demo brief: approving simulates the send; nothing is emailed. */
+  demo?: boolean;
   /** false once the server stopped listing this approval as pending (we keep showing our own receipt or refusal). */
   live: boolean;
   approver: string | null;
@@ -102,7 +105,10 @@ function PendingBrief({
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [error, setError] = useState<string | null>(null);
   const { remainingMs, fraction, expired } = useCountdown(pending.expiresAt, pending.createdAt);
-  const n = pending.drafts.length;
+  // Copy-only drafts (no email address) are not "replies waiting": list only what will be emailed.
+  const emailable = pending.drafts.filter((d) => !draftHasNoAddress({ draft: d }));
+  const listed = emailable.length > 0 ? emailable : pending.drafts;
+  const n = listed.length;
   // Desk asks added without a sender email: approving marks them ready to copy; nothing is emailed.
   const copyOnly = pending.drafts.filter((d) => draftHasNoAddress({ draft: d })).length;
 
@@ -147,6 +153,17 @@ function PendingBrief({
     const sent = typeof data.sent === "number" ? data.sent : null;
 
     if (ok) {
+      // Demo brief, or the server reports simulated sends: say plainly that nothing was emailed.
+      const simulatedN = typeof data.simulated === "number" ? data.simulated : demo && !(sent && sent > 0) ? n : 0;
+      if (simulatedN > 0 && !(sent && sent > 0)) {
+        const reason = typeof data.reason === "string" && data.reason.trim() ? data.reason.trim() : null;
+        showReceipt({
+          tone: "no",
+          text: reason ?? `Demo: ${plural(simulatedN, "reply", "replies")} approved. Nobody else was emailed.`,
+          holdMs: RECEIPT_MS,
+        });
+        return;
+      }
       const what = sent === null ? "Approved" : sent > 0 ? `Sent ${plural(sent, "reply", "replies")}` : copyOnly > 0 ? "Approved" : "Nothing new sent";
       const copyNote = copyOnly > 0 ? ` · ${plural(copyOnly, "reply", "replies")} ready to copy, not sent` : "";
       showReceipt({ tone: "yes", text: `${what}${copyNote} · ${time} · code used`, holdMs: RECEIPT_MS });
@@ -208,9 +225,13 @@ function PendingBrief({
           state={state}
           variant={dead ? "inactive" : "default"}
           icon={<BellRing className="size-4" />}
-          title={dead ? "This brief is no longer awaiting a yes" : "1 brief awaiting your yes"}
-          subtitle={`Fewer drafted ${sendLabel}. Nothing sends without your yes.`}
-          allowOnceLabel={`Approve & send ${sendLabel}`}
+          title={dead ? "This is no longer waiting for you" : `${demo ? "Demo: " : ""}${sendLabel} waiting for you`}
+          subtitle={
+            demo
+              ? "Only your work inbox gets a copy."
+              : "Nothing is sent until you approve."
+          }
+          allowOnceLabel={demo ? "Approve demo" : "Approve"}
           denyLabel="Hold"
           onAllowOnce={nothingToSend ? undefined : approve}
           onDeny={hold}
@@ -218,23 +239,25 @@ function PendingBrief({
             receipt
               ? receipt.text
               : busy === "approve"
-                ? `Sending ${sendLabel}…`
+                ? demo
+                  ? "Approving the demo…"
+                  : `Sending ${sendLabel}…`
                 : busy === "hold"
-                  ? "Holding the brief…"
+                  ? "Holding…"
                   : undefined
           }
           statusTone={receipt?.tone}
           className={
             dead
               ? "border-line-strong"
-              : "border-askone-accent/50 shadow-[0_8px_30px_-12px_color-mix(in_srgb,var(--color-askone-accent)_35%,transparent)]"
+              : "border-ink/25 shadow-[0_10px_30px_-14px_rgba(27,31,35,0.35)]"
           }
           aside={
             <span
               role="timer"
               aria-live="off"
               className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium tabular-nums ${
-                closed ? "bg-no-bg text-no-fg" : "bg-askone-bg text-askone-fg"
+                closed ? "bg-no-bg text-no-fg" : "border border-line-strong bg-paper text-ink"
               }`}
             >
               <Hourglass aria-hidden className="size-4" />
@@ -245,7 +268,7 @@ function PendingBrief({
             fraction !== null ? (
               <div aria-hidden className="h-0.5 bg-line">
                 <div
-                  className="h-full bg-askone-accent transition-[width] duration-1000 ease-linear"
+                  className="h-full bg-ink transition-[width] duration-1000 ease-linear"
                   style={{ width: `${(closed ? 0 : fraction) * 100}%` }}
                 />
               </div>
@@ -274,16 +297,22 @@ function PendingBrief({
                 <p role="status" aria-live="polite" className={error ? "text-[13px] text-blocked-fg" : "sr-only"}>
                   {error ?? ""}
                 </p>
-                <p className="text-[12.5px] text-muted">
-                  Or reply <span className="font-mono text-ink">YES {pending.code}</span>
-                  {approver ? (
-                    <>
-                      {" "}
-                      from <span className="font-mono">{approver}</span>
-                    </>
-                  ) : null}
-                  . The code works once.
-                </p>
+                <details className="group text-[12.5px] text-muted">
+                  <summary className="inline-flex min-h-11 cursor-pointer list-none items-center gap-1 rounded-md pr-2 font-medium hover:text-ink">
+                    <ChevronRight aria-hidden className="size-3.5 transition-transform group-open:rotate-90" />
+                    Approve by email
+                  </summary>
+                  <p className="pb-1 pl-[18px]">
+                    Or reply <span className="font-mono text-ink">YES {pending.code}</span>
+                    {approver ? (
+                      <>
+                        {" "}
+                        from <span className="font-mono">{approver}</span>
+                      </>
+                    ) : null}
+                    . The code works once.
+                  </p>
+                </details>
               </>
             )
           }
@@ -300,7 +329,7 @@ function PendingBrief({
           </div>
 
           <ul className="divide-y divide-line border-y border-line" aria-label="Drafts in this brief">
-            {pending.drafts.map((d) => (
+            {listed.map((d) => (
               <li key={d.id} className="py-3">
                 <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13.5px]">
                   {verdictByDraft?.[d.id] ? <VerdictChip verdict={verdictByDraft[d.id]!} /> : null}
@@ -310,10 +339,15 @@ function PendingBrief({
                     {draftHasNoAddress({ draft: d }) ? "No email address: you copy it after your yes" : d.to}
                   </span>
                 </p>
-                <p className="mt-0.5 line-clamp-2 text-[13px] leading-snug text-muted">{d.body}</p>
+                <p className="mt-0.5 line-clamp-1 text-[13px] leading-snug text-muted">{d.body}</p>
               </li>
             ))}
           </ul>
+          {emailable.length > 0 && copyOnly > 0 ? (
+            <p className="text-[13px] text-muted">
+              {plural(copyOnly, "reply", "replies")} ready to copy after you approve. They are not emailed.
+            </p>
+          ) : null}
         </ApprovalCard>
       </Collapse>
     </div>
@@ -336,8 +370,11 @@ export function ApprovalBanner({
   timeZone,
   className,
   verdictByDraft,
+  demo = false,
 }: {
   pending: PendingApprovalView | null;
+  /** The pending brief holds demo drafts only: CTA and receipt say nothing is emailed. */
+  demo?: boolean;
   /** Draft id -> the verdict of the ask it answers (from /api/desk asks[].draft.id). Shown as a solid badge per draft. */
   verdictByDraft?: Record<string, Verdict | null | undefined>;
   approver: string | null;
@@ -361,6 +398,7 @@ export function ApprovalBanner({
       timeZone={timeZone}
       className={className}
       verdictByDraft={verdictByDraft}
+      demo={demo || shown.demo === true}
     />
   );
 }

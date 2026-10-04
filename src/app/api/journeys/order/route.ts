@@ -9,7 +9,8 @@ export const runtime = "nodejs";
  * Re-ranks the journeys 1..N, then re-decides open asks from stored data only (no model call):
  * -> 200 { ok, order: [{id, rank, title}], changed: [{askId, title, from, to, rule}], unchanged, skipped, failed }
  * A changed verdict expires any pending approval holding that ask's draft; the draft text is flagged stale.
- * After the response, changed asks are re-drafted (triage) and get fresh briefs, demo and live kept apart.
+ * After the response, changed asks with a deliverable sender get a fresh DRAFT for the saved decision (never a
+ * re-parse, research or re-decide) and a brief, demo and live kept apart. Copy-only asks keep their stale draft.
  */
 export async function POST(req: Request) {
   const notJson = requireJson(req);
@@ -22,22 +23,19 @@ export async function POST(req: Request) {
     const result = await reorderJourneys(body.ids);
     if (!result.ok) return jsonError(400, result.error);
     const changedIds = result.changed.map((c) => c.askId);
-    if (changedIds.length) after(() => redraft(changedIds).catch((e) => console.error("[fewer/api/journeys/order]", e)));
+    // Drafts only (no re-parse, no research, no re-decide), so the verdicts above stay exactly as returned.
+    if (changedIds.length) after(() => redraft(changedIds));
     return json(result);
   } catch (e) {
     return jsonError(500, safeMessage(e, "Could not reorder your goals right now."));
   }
 }
 
-/** Re-draft asks whose verdict flipped, then brief them; demo and live asks never share an approval. */
 async function redraft(askIds: string[]): Promise<void> {
-  const { triage, sendBrief, isDemoAsk } = await import("@/server/pipeline");
-  const { getAsk } = await import("@/server/db");
-  await Promise.all(askIds.map((id) => triage(id)));
-  const rows = await Promise.all(askIds.map((id) => getAsk(id)));
-  const ready = rows.filter((a) => a && a.status === "triaged");
-  const demo = ready.filter((a) => isDemoAsk(a!.inbox_message_id)).map((a) => a!.id);
-  const live = ready.filter((a) => !isDemoAsk(a!.inbox_message_id)).map((a) => a!.id);
-  if (demo.length) await sendBrief(demo);
-  if (live.length) await sendBrief(live);
+  try {
+    const { redraftChanged } = await import("@/server/redraft");
+    await redraftChanged(askIds);
+  } catch (e) {
+    console.error("[fewer/api/journeys/order]", e instanceof Error ? e.message : e);
+  }
 }

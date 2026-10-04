@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { memo, useId, useState } from "react";
 import {
   BadgeCheck,
   Check,
@@ -17,7 +17,9 @@ import type { AskCardData, FitLine } from "./types";
 import { RULE_NAMES, VERDICTS, ruleShortName } from "./tokens";
 import { clockTime, formatHours, relativeTime, savedHoursForSmaller, whenLabel } from "./format";
 import { ReadingPlan, StageRail } from "./AskStages";
-import { draftHasNoAddress, isReadyToCopy } from "./stages";
+import { VerdictChip } from "./VerdictChip";
+import { draftHasNoAddress, isReadyToCopy, stagesFor } from "./stages";
+import { VerdictChangeBadge, type VerdictChange } from "./Actions";
 
 /** End a sentence with a period unless it already ends in punctuation. */
 function sentence(text: string): string {
@@ -174,8 +176,22 @@ function CopyReply({ text }: { text: string }) {
   );
 }
 
-export function VerdictCard({ card, timeZone, isNew }: { card: AskCardData; timeZone: string; isNew: boolean }) {
+function VerdictCardImpl({
+  card,
+  timeZone,
+  isNew,
+  change,
+}: {
+  card: AskCardData;
+  timeZone: string;
+  isNew: boolean;
+  /** Set briefly after a goal reorder changed this verdict. */
+  change?: VerdictChange;
+}) {
   const [open, setOpen] = useState(false);
+  // Collapsed by default: verdict word, why, title. Details holds stages, reasons, evidence and the draft.
+  const [expanded, setExpanded] = useState(false);
+  const detailsId = useId();
   // Was a verdict already on this card when it first rendered? Decides when the landing animation waits for card-in.
   const [hadVerdictAtMount] = useState(card.verdict !== null);
   const draftId = useId();
@@ -199,13 +215,54 @@ export function VerdictCard({ card, timeZone, isNew }: { card: AskCardData; time
   const ruleReasons = card.reasons.filter((r) => !/^Advances /.test(r));
   const shownFits = card.fits.filter((f) => f.score > 0).slice(0, 3);
 
+  if (!expanded) {
+    // Collapsed: one light row. Nothing heavy (rail, evidence, draft, stamp) mounts until it is opened.
+    const time = card.startsAt ? clockTime(card.startsAt, timeZone) : null;
+    return (
+      <article
+        aria-labelledby={titleId}
+        className={`overflow-hidden rounded-xl border bg-surface ${change ? "border-focus ring-2 ring-focus/40" : "border-line"} ${
+          isNew ? "card-in" : ""
+        }`}
+      >
+        <button
+          type="button"
+          aria-expanded={false}
+          onClick={() => setExpanded(true)}
+          className="flex min-h-14 w-full items-center gap-3 px-3.5 py-2.5 text-left hover:bg-paper/60 sm:gap-4"
+        >
+          <span className="w-[64px] shrink-0 text-[14px] font-bold text-ink tabular-nums sm:w-[76px]">{time ?? "Any time"}</span>
+          <span className="min-w-0 flex-1">
+            <span id={titleId} className="block truncate text-[16px] font-semibold leading-snug text-ink">
+              {card.title}
+            </span>
+            {why ? <span className="block truncate text-[13.5px] leading-snug text-muted">{why}</span> : null}
+          </span>
+          {change ? <VerdictChangeBadge key={`${change.from}-${change.to}`} change={change} /> : null}
+          {readyToCopy ? <span className="hidden shrink-0 rounded-full bg-paper px-2.5 py-1 text-[12.5px] font-semibold text-ink sm:inline">Copy reply</span> : null}
+          {card.verdict ? (
+            <VerdictChip verdict={card.verdict} />
+          ) : card.status === "error" ? (
+            <span className="shrink-0 text-[13px] font-medium text-warn-fg">Couldn’t finish</span>
+          ) : (
+            <span className="inline-flex shrink-0 items-center gap-2 text-[13px] italic text-muted">
+              <span aria-hidden className="live-dot inline-block size-2 rounded-full bg-focus" />
+              Reading…
+            </span>
+          )}
+          <ChevronDown aria-hidden className="size-5 shrink-0 text-muted" />
+        </button>
+      </article>
+    );
+  }
+
   return (
     <article
       aria-labelledby={titleId}
       style={landing ? landStyle : undefined}
-      className={`relative overflow-hidden rounded-xl border border-line bg-surface pl-[5px] shadow-[0_1px_0_rgba(27,31,35,0.03)] ${
-        isNew ? "card-in" : ""
-      }`}
+      className={`relative overflow-hidden rounded-2xl border bg-surface pl-[5px] shadow-[0_1px_0_rgba(27,31,35,0.03)] transition-[box-shadow,border-color] duration-300 ${
+        change ? "border-focus ring-2 ring-focus/40" : "border-line"
+      } ${isNew ? "card-in" : ""}`}
     >
       <span
         aria-hidden
@@ -224,6 +281,7 @@ export function VerdictCard({ card, timeZone, isNew }: { card: AskCardData; time
           ) : (
             <span />
           )}
+          {change ? <VerdictChangeBadge key={`${change.from}-${change.to}`} change={change} /> : null}
           <time dateTime={card.receivedAt} className="shrink-0 text-[12px] text-muted tabular">
             {relativeTime(card.receivedAt)}
           </time>
@@ -256,13 +314,13 @@ export function VerdictCard({ card, timeZone, isNew }: { card: AskCardData; time
           <h3 id={titleId} className="text-[17px] font-semibold leading-snug tracking-tight text-ink">
             {card.title}
           </h3>
-          {sender ? (
+          {sender && expanded ? (
             <p className="mt-0.5 flex items-start gap-x-1.5 text-[13px] text-muted">
               <Mail aria-hidden className="mt-[3px] size-3.5 shrink-0" />
               <span className="min-w-0 break-words">{sender}</span>
             </p>
           ) : null}
-          {when || card.inPerson != null ? (
+          {expanded && (when || card.inPerson != null) ? (
             <p className="mt-0.5 text-[13px] text-muted">
               {when}
               {when && card.inPerson != null ? " · " : ""}
@@ -273,6 +331,8 @@ export function VerdictCard({ card, timeZone, isNew }: { card: AskCardData; time
 
         {!card.verdict && card.status === "working" ? <ReadingPlan card={card} /> : null}
 
+        {expanded ? (
+        <div id={detailsId}>
         {card.verdict ? (
           <div className="mt-4 grid gap-4 border-t border-line pt-4 md:grid-cols-2">
             <section aria-label="Model suggests">
@@ -328,6 +388,8 @@ export function VerdictCard({ card, timeZone, isNew }: { card: AskCardData; time
 
         <CostBar card={card} />
         {card.verdict && card.verdict !== "BLOCKED" ? <EvidenceChips card={card} /> : null}
+        </div>
+        ) : null}
 
         {card.draft && readyToCopy ? (
           <section aria-label="Reply ready to copy" className="mt-4 rounded-lg border border-yes-accent/40 bg-yes-bg/40 px-4 py-3">
@@ -341,7 +403,7 @@ export function VerdictCard({ card, timeZone, isNew }: { card: AskCardData; time
               Fewer did not send this. Copy it and send it yourself.
             </p>
           </section>
-        ) : card.draft ? (
+        ) : card.draft && expanded ? (
           <div className="mt-4">
             <button
               type="button"
@@ -369,9 +431,29 @@ export function VerdictCard({ card, timeZone, isNew }: { card: AskCardData; time
       </div>
 
       {hideFooter || !card.verdict ? null : (
-        <footer className="flex flex-col gap-2 border-t border-line bg-paper/60 px-4 py-3 sm:px-5">
-          <div className="flex items-center gap-3">
-            <StageRail card={card} sentTime={card.sentAt ? clockTime(card.sentAt, timeZone) : null} />
+        <footer className="flex flex-col gap-2 border-t border-line bg-paper/60 px-4 py-2.5 sm:px-5">
+          {expanded ? (
+            <div className="pt-1">
+              <StageRail card={card} sentTime={card.sentAt ? clockTime(card.sentAt, timeZone) : null} />
+            </div>
+          ) : null}
+          <div className="flex items-center justify-between gap-3">
+            <p className="min-w-0 truncate text-[12.5px] text-muted">
+              {expanded ? "" : stagesFor(card).current}
+            </p>
+            <button
+              type="button"
+              aria-expanded={expanded}
+              aria-controls={detailsId}
+              onClick={() => setExpanded((e) => !e)}
+              className="group inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[13px] font-medium text-ink hover:text-focus"
+            >
+              {expanded ? "Hide details" : "Details"}
+              <ChevronDown
+                aria-hidden
+                className={`size-4 text-muted transition-transform group-hover:text-focus ${expanded ? "rotate-180" : ""}`}
+              />
+            </button>
           </div>
           {card.outcome ? (
             <p className="text-[13px] text-ink">
@@ -380,10 +462,20 @@ export function VerdictCard({ card, timeZone, isNew }: { card: AskCardData; time
               {card.outcome.note ? <span className="text-muted"> — “{card.outcome.note}”</span> : null}
             </p>
           ) : card.checkinSent ? (
-            <p className="text-[13px] text-muted">Check-in sent. Waiting for a 1–5.</p>
+            <p className="text-[13px] text-muted">Check-in sent. Waiting for a rating from 1 to 5.</p>
           ) : null}
         </footer>
       )}
     </article>
   );
 }
+
+/** Memoized: a 2.5 s poll that leaves this ask unchanged does not re-render its row. */
+export const VerdictCard = memo(
+  VerdictCardImpl,
+  (a, b) =>
+    a.timeZone === b.timeZone &&
+    a.isNew === b.isNew &&
+    a.change === b.change &&
+    (a.card === b.card || JSON.stringify(a.card) === JSON.stringify(b.card)),
+);

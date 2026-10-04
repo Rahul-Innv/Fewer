@@ -205,6 +205,63 @@
       "fits": [{ "journeyId": "j2", "score": 3, "reason": "live agent demos" }],
       "claims": [],
       "expect": { "verdict": "NO", "rule": "R6", "reasonIncludes": "none of its claims checked out on 2+ independent sites" }
+    },
+    {
+      "name": "meeting overlapping a calendar busy block (times only) is SMALLER: offer another time",
+      "ask": {
+        "id": "a15", "from": "dana@designpartner.co", "subject": "30 min on Thursday?", "kind": "meeting",
+        "title": "Design-partner call with Dana", "tag": "call", "startsAt": "2026-10-08T14:00:00-07:00", "durationMin": 30,
+        "inPerson": false, "containsInstructionsToAgent": false
+      },
+      "fits": [{ "journeyId": "j1", "score": 2, "reason": "Dana runs a design-partner program" }],
+      "claims": [],
+      "ctx": { "takenBlocks": [{ "start": "2026-10-08T21:15:00Z", "end": "2026-10-08T22:00:00Z", "label": "your calendar", "kind": "calendar" }] },
+      "expect": { "verdict": "SMALLER", "rule": "R1", "reasonIncludes": "Your calendar is busy then", "smallerOfferIncludes": "another time" }
+    },
+    {
+      "name": "same meeting with a calendar block that only touches its end is unchanged (YES)",
+      "ask": {
+        "id": "a15", "from": "dana@designpartner.co", "subject": "30 min on Thursday?", "kind": "meeting",
+        "title": "Design-partner call with Dana", "tag": "call", "startsAt": "2026-10-08T14:00:00-07:00", "durationMin": 30,
+        "inPerson": false, "containsInstructionsToAgent": false
+      },
+      "fits": [{ "journeyId": "j1", "score": 2, "reason": "Dana runs a design-partner program" }],
+      "claims": [],
+      "ctx": { "takenBlocks": [{ "start": "2026-10-08T14:30:00-07:00", "end": "2026-10-08T15:30:00-07:00", "label": "your calendar", "kind": "calendar" }] },
+      "expect": { "verdict": "YES", "rule": "R3", "reasonIncludes": "Ship Fewer to 100 users" }
+    },
+    {
+      "name": "event overlapping an already-accepted YES ask is a NO that names it",
+      "ask": {
+        "id": "a16", "from": "host@agentsdinner.dev", "subject": "Agents builders dinner Thursday", "kind": "event",
+        "title": "Agents builders dinner", "tag": "dinner", "startsAt": "2026-10-08T18:30:00-07:00", "durationMin": 120,
+        "inPerson": true, "containsInstructionsToAgent": false
+      },
+      "fits": [{ "journeyId": "j2", "score": 3, "reason": "a room of agent engineers" }],
+      "claims": [
+        { "text": "Hosted at the Ferry Building", "sources": [
+          { "domain": "lu.ma", "url": "https://lu.ma/agents-dinner", "quote": "Ferry Building", "quoteFound": true, "checkedAt": "2026-10-04T12:00:00-07:00" },
+          { "domain": "agentsdinner.dev", "url": "https://agentsdinner.dev", "quote": "Ferry Building", "quoteFound": true, "checkedAt": "2026-10-04T12:00:00-07:00" }
+        ] }
+      ],
+      "ctx": { "takenBlocks": [{ "start": "2026-10-09T02:00:00Z", "end": "2026-10-09T04:00:00Z", "label": "Founders demo night", "kind": "accepted" }] },
+      "expect": { "verdict": "NO", "rule": "R1", "reasonIncludes": "Clashes with Founders demo night at 7:00 PM Thu" }
+    },
+    {
+      "name": "same event with no taken time is unchanged (YES)",
+      "ask": {
+        "id": "a16", "from": "host@agentsdinner.dev", "subject": "Agents builders dinner Thursday", "kind": "event",
+        "title": "Agents builders dinner", "tag": "dinner", "startsAt": "2026-10-08T18:30:00-07:00", "durationMin": 120,
+        "inPerson": true, "containsInstructionsToAgent": false
+      },
+      "fits": [{ "journeyId": "j2", "score": 3, "reason": "a room of agent engineers" }],
+      "claims": [
+        { "text": "Hosted at the Ferry Building", "sources": [
+          { "domain": "lu.ma", "url": "https://lu.ma/agents-dinner", "quote": "Ferry Building", "quoteFound": true, "checkedAt": "2026-10-04T12:00:00-07:00" },
+          { "domain": "agentsdinner.dev", "url": "https://agentsdinner.dev", "quote": "Ferry Building", "quoteFound": true, "checkedAt": "2026-10-04T12:00:00-07:00" }
+        ] }
+      ],
+      "expect": { "verdict": "YES", "rule": "R3", "reasonIncludes": "Get sharper at agent engineering" }
     }
   ]
 }

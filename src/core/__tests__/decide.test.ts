@@ -16,7 +16,7 @@ import {
   type Journey,
   type ParsedAsk,
 } from "../contracts";
-import { decide, overlapsTimeBlock, toLocalTime } from "../decide";
+import { decide, findClashes, overlapsInterval, overlapsTimeBlock, toLocalTime } from "../decide";
 
 interface GoldenCase {
   name: string;
@@ -434,5 +434,128 @@ describe("decide: cost and fits", () => {
     const run = () =>
       decide(makeAsk(), [{ journeyId: "j1", score: 2, reason: "x" }], [VERIFIED_CLAIM], journeys, boundaries, baseCtx);
     expect(run()).toEqual(run());
+  });
+});
+
+describe("taken time: clash rule (R1)", () => {
+  const cal = (start: string, end: string) => ({ start, end, label: "your calendar", kind: "calendar" as const });
+  const accepted = (start: string, end: string, label: string) => ({ start, end, label, kind: "accepted" as const });
+  const coffee = makeAsk({ kind: "meeting", title: "Coffee", tag: "coffee", startsAt: "2026-10-08T14:00:00-07:00", durationMin: 30 });
+  const fit2 = [{ journeyId: "j1", score: 2 as const, reason: "design partner" }];
+
+  it("overlapsInterval: half-open intervals, touching edges do not overlap", () => {
+    expect(overlapsInterval(0, 10, 9, 20)).toBe(true);
+    expect(overlapsInterval(0, 10, 10, 20)).toBe(false);
+    expect(overlapsInterval(10, 20, 0, 10)).toBe(false);
+    expect(overlapsInterval(0, 30, 10, 20)).toBe(true);
+  });
+
+  it("compares absolute instants across offsets (PT ask vs UTC and IST blocks)", () => {
+    // Ask: Thu 14:00-14:30 PT = 21:00-21:30Z.
+    expect(findClashes(coffee, [cal("2026-10-08T21:29:00Z", "2026-10-08T22:00:00Z")])).toHaveLength(1);
+    expect(findClashes(coffee, [cal("2026-10-08T21:30:00Z", "2026-10-08T22:00:00Z")])).toHaveLength(0);
+    // 02:30 IST on Oct 9 (+05:30) = 21:00Z on Oct 8.
+    expect(findClashes(coffee, [cal("2026-10-09T02:30:00+05:30", "2026-10-09T03:00:00+05:30")])).toHaveLength(1);
+    // Same wall-clock 14:00 but in New York (= 11:00 PT): no clash.
+    expect(findClashes(coffee, [cal("2026-10-08T14:00:00-04:00", "2026-10-08T14:30:00-04:00")])).toHaveLength(0);
+  });
+
+  it("across the DST change: a block written with the old offset still lines up", () => {
+    // Nov 1 2026 01:30 PST (-08:00) = 09:30Z; written as 02:30 -07:00 it is the same instant.
+    const ask = makeAsk({ kind: "meeting", startsAt: "2026-11-01T01:30:00-08:00", durationMin: 30 });
+    expect(findClashes(ask, [cal("2026-11-01T02:30:00-07:00", "2026-11-01T03:00:00-07:00")])).toHaveLength(1);
+  });
+
+  it("ignores asks without a start or duration and malformed blocks", () => {
+    expect(findClashes({ startsAt: undefined, durationMin: 30 }, [cal("2026-10-08T21:00:00Z", "2026-10-08T22:00:00Z")])).toEqual([]);
+    expect(findClashes({ startsAt: coffee.startsAt, durationMin: undefined }, [cal("2026-10-08T21:00:00Z", "2026-10-08T22:00:00Z")])).toEqual([]);
+    expect(findClashes(coffee, [cal("nope", "2026-10-08T22:00:00Z"), cal("2026-10-08T22:00:00Z", "2026-10-08T21:00:00Z")])).toEqual([]);
+  });
+
+  it("a meeting with some fit that clashes with the calendar is SMALLER with another-time offer", () => {
+    const d = decide(coffee, fit2, [], journeys, boundaries, ctxWith({ takenBlocks: [cal("2026-10-08T21:00:00Z", "2026-10-08T22:00:00Z")] }));
+    expect(d).toMatchObject({ verdict: "SMALLER", rule: "R1", smallerOffer: "Offer another time that week" });
+    expect(d.reasons[0]).toBe("Your calendar is busy then");
+  });
+
+  it("a request and an 'other' clashing with an accepted ask are SMALLER and name it", () => {
+    for (const kind of ["request", "other"] as const) {
+      const d = decide(
+        { ...coffee, kind },
+        fit2,
+        [],
+        journeys,
+        boundaries,
+        ctxWith({ takenBlocks: [accepted("2026-10-08T13:45:00-07:00", "2026-10-08T14:15:00-07:00", "Coffee with Sam")] }),
+      );
+      expect(d).toMatchObject({ verdict: "SMALLER", rule: "R1" });
+      expect(d.reasons[0]).toBe("Clashes with Coffee with Sam at 1:45 PM Thu");
+    }
+  });
+
+  it("a clashing meeting with no fit is a NO (a clash never upgrades a NO)", () => {
+    const d = decide(coffee, [], [], journeys, boundaries, ctxWith({ takenBlocks: [cal("2026-10-08T21:00:00Z", "2026-10-08T22:00:00Z")] }));
+    expect(d).toMatchObject({ verdict: "NO", rule: "R1" });
+  });
+
+  it("an event clashing with both lists the accepted ask first, the calendar once", () => {
+    const d = decide(
+      makeAsk({ startsAt: "2026-10-08T14:00:00-07:00", durationMin: 60 }),
+      [{ journeyId: "j2", score: 3, reason: "demos" }],
+      [VERIFIED_CLAIM],
+      journeys,
+      boundaries,
+      ctxWith({
+        takenBlocks: [
+          cal("2026-10-08T21:00:00Z", "2026-10-08T21:30:00Z"),
+          cal("2026-10-08T21:30:00Z", "2026-10-08T22:00:00Z"),
+          accepted("2026-10-08T14:30:00-07:00", "2026-10-08T15:30:00-07:00", "Agents demo night"),
+        ],
+      }),
+    );
+    expect(d).toMatchObject({ verdict: "NO", rule: "R1" });
+    expect(d.reasons).toEqual(["Clashes with Agents demo night at 2:30 PM Thu", "Your calendar is busy then"]);
+  });
+
+  it("R0 and R2 still win over a clash; an absolute boundary keeps its own R1 offer", () => {
+    const block = [cal("2026-10-01T00:00:00Z", "2026-10-02T00:00:00Z"), cal("2026-10-06T16:00:00Z", "2026-10-06T17:00:00Z")];
+    expect(decide(makeAsk({ containsInstructionsToAgent: true }), [], [], journeys, boundaries, ctxWith({ takenBlocks: block })).rule).toBe("R0");
+    expect(decide(makeAsk({ durationMin: undefined }), [], [], journeys, boundaries, ctxWith({ takenBlocks: block })).rule).toBe("R2");
+    // Tue 09:00 PT meeting: inside the absolute deep-work block AND the calendar block.
+    const d = decide(
+      makeAsk({ kind: "meeting", startsAt: "2026-10-06T09:00:00-07:00", durationMin: 30 }),
+      fit2,
+      [],
+      journeys,
+      boundaries,
+      ctxWith({ takenBlocks: block }),
+    );
+    expect(d).toMatchObject({ verdict: "SMALLER", rule: "R1", smallerOffer: "Offer 20 minutes outside protected hours" });
+    expect(d.reasons).toContain("Your calendar is busy then");
+  });
+
+  it("an undated request is unaffected by taken time", () => {
+    const ask = makeAsk({ kind: "request", startsAt: undefined, durationMin: undefined });
+    const without = decide(ask, fit2, [], journeys, boundaries, baseCtx);
+    const withBlocks = decide(ask, fit2, [], journeys, boundaries, ctxWith({ takenBlocks: [cal("2026-10-01T00:00:00Z", "2026-12-01T00:00:00Z")] }));
+    expect(withBlocks).toEqual(without);
+  });
+
+  it("the learned dislike still applies on a clash", () => {
+    const d = decide(
+      { ...coffee, tag: "panel" },
+      [{ journeyId: "j1", score: 2, reason: "x" }],
+      [],
+      journeys,
+      boundaries,
+      ctxWith({ takenBlocks: [cal("2026-10-08T21:00:00Z", "2026-10-08T22:00:00Z")] }),
+    );
+    expect(d.effectiveFit.find((f) => f.journeyId === "j1")?.score).toBe(1);
+    expect(d.reasons.join(" | ")).toContain("You rated a panel 2/5");
+  });
+
+  it("the context schema accepts taken blocks and rejects a bad kind", () => {
+    expect(DecisionContextSchema.safeParse({ ...baseCtx, takenBlocks: [cal("2026-10-08T21:00:00Z", "2026-10-08T22:00:00Z")] }).success).toBe(true);
+    expect(DecisionContextSchema.safeParse({ ...baseCtx, takenBlocks: [{ ...cal("2026-10-08T21:00:00Z", "2026-10-08T22:00:00Z"), kind: "x" }] }).success).toBe(false);
   });
 });

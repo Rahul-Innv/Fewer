@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { STAGES, agentNow, draftHasNoAddress, isReadyToCopy, stagesFor } from "./stages";
+import { STAGES, agentNow, demoStepFor, draftHasNoAddress, isReadyToCopy, isSimulated, stagesFor } from "./stages";
 import type { AskCardData, DeskData } from "./types";
 
 const base = { verdict: null, status: "working", evidence: [], draft: null } as Pick<
@@ -94,5 +94,35 @@ describe("ready to copy (Desk ask with no sender email, approved, nothing sent)"
     expect(m.steps.at(-1)).toBe("Ready to copy");
     expect(m.steps).not.toContain("Sent");
     expect(m.activeIndex).toBe(m.steps.length);
+  });
+});
+
+describe("demoStepFor: the 5-step story from live data", () => {
+  const card = (patch: Partial<AskCardData>) =>
+    ({ ...base, receivedAt: "2026-10-04T20:00:00Z", checkinSent: false, statusLabel: "", ...patch }) as AskCardData;
+  const desk = (asks: AskCardData[], extra: Partial<DeskData> = {}) =>
+    ({ asks, pending: null, checkinsSent: 0, ...extra }) as unknown as DeskData;
+  const pending = { id: "p", code: "AB12", expiresAt: null, createdAt: "2026-10-04T20:00:00Z", drafts: [draft, draft] };
+
+  it("no asks: step 2 (goals are step 1)", () => expect(demoStepFor(desk([])).step).toBe(2));
+  it("asks with no verdict: step 2", () => expect(demoStepFor(desk([card({})])).step).toBe(2));
+  it("verdicts, nothing pending: step 3", () => expect(demoStepFor(desk([card({ verdict: "NO", status: "held" })])).step).toBe(3));
+  it("pending approval: step 4, caption counts replies", () => {
+    const s = demoStepFor(desk([card({ verdict: "NO", status: "awaiting" })], { pending } as Partial<DeskData>));
+    expect(s.step).toBe(4);
+    expect(s.caption).toContain("send 2 replies");
+  });
+  it("sent: step 5", () => expect(demoStepFor(desk([card({ verdict: "YES", status: "sent", draft })])).step).toBe(5));
+  it("demo sent is simulated: step 5 says only the review copy went out", () => {
+    const s = demoStepFor(desk([card({ verdict: "YES", status: "sent", draft, demo: true })]));
+    expect(s.step).toBe(5);
+    expect(s.demo).toBe(true);
+    expect(s.caption).toContain("Nobody else was emailed");
+  });
+  it("check-in sent: step 6", () =>
+    expect(demoStepFor(desk([card({ verdict: "YES", status: "sent", draft, checkinSent: true })])).step).toBe(6));
+  it("simulated status never reads as sent on the card", () => {
+    expect(stagesFor({ ...base, verdict: "YES", status: "simulated", draft }).current).toBe("Would send · demo, not emailed");
+    expect(isSimulated({ status: "sent", demo: false })).toBe(false);
   });
 });

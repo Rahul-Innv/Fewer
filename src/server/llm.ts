@@ -444,7 +444,7 @@ function templateBody(ask: ParsedAsk, decision: Decision): string {
     case "WILDCARD":
       return `${hi}\n\nThank you for thinking of me for ${what}. I'd be glad to take part. If there is anything I should know beforehand, please send it over.`;
     case "SMALLER":
-      return `${hi}\n\nThank you for thinking of me for ${what}. The full version isn't something I can take on right now, but here is what I can offer instead: ${decision.smallerOffer ?? "a shorter, lighter touch"}.`;
+      return `${hi}\n\nThank you for thinking of me for ${what}. I'd love to make this work in a lighter form: ${decision.smallerOffer ?? "a shorter, lighter version"}. Would that work for you?`;
     case "ASK_ONE":
       return `${hi}\n\nThank you for thinking of me for ${what}. Before I can say yes or no, one quick question: ${decision.question ?? "could you share a few more details?"}`;
     case "BLOCKED":
@@ -474,7 +474,7 @@ export async function draftReply(
 
   const guidance: Record<string, string> = {
     NO: "Politely decline. Thank them, give no detailed reason and do not reveal the owner's priorities or schedule. Do not promise a future yes and do not propose alternatives.",
-    SMALLER: `Warmly decline the full ask and offer exactly this smaller alternative, in your own words but without changing its meaning: "${decision.smallerOffer ?? ""}".`,
+    SMALLER: `Do NOT decline or refuse. Lead with a warm yes to a smaller version and state this offer word for word: "${decision.smallerOffer ?? ""}". At most one short clause on why (for example the original time is taken). End by asking if that works for them.`,
     ASK_ONE: `Do not accept or decline yet. Ask exactly this one question, in your own words but without changing its meaning: "${decision.question ?? ""}".`,
     YES: "Accept warmly and say the owner is glad to take part. Add no logistics that are not in the facts; you may ask them to send any details.",
     WILDCARD: "Accept warmly and with a little curiosity (this is a stretch the owner chose to say yes to). Add no logistics that are not in the facts.",
