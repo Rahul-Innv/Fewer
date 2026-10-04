@@ -215,13 +215,13 @@ describe("buildMorningBrief", () => {
           { title: "C", status: "triaged", startsAt: "2026-10-09T17:00:00-07:00", inPerson: true },
           { title: "D (virtual)", status: "sent", startsAt: "2026-10-07T19:00:00-07:00", inPerson: false },
           { title: "E (before 17:00)", status: "sent", startsAt: "2026-10-07T16:59:00-07:00", inPerson: true },
-          { title: "F (ready, not counted by the rules)", status: "ready", startsAt: "2026-10-08T18:00:00-07:00", inPerson: true },
+          { title: "F (ready: approved, copy-only; counts toward the cap)", status: "ready", startsAt: "2026-10-08T18:00:00-07:00", inPerson: true },
         ],
       }),
       TZ,
     );
-    expect(b.facts.evenings).toEqual({ cap: 1, used: 3, left: 0 });
-    expect(b.text).toContain("Evenings out left this week: 0 of 1 (3 committed)");
+    expect(b.facts.evenings).toEqual({ cap: 1, used: 4, left: 0 });
+    expect(b.text).toContain("Evenings out left this week: 0 of 1 (4 committed)");
     expect(b.summary).toContain("0 of 1 evening out left this week");
   });
 

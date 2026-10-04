@@ -244,9 +244,28 @@ export async function committedAsks(
     join lateral (
       select verdict from decisions x where x.ask_id = a.id order by x.id desc limit 1
     ) d on true
-    where a.status in ('triaged', 'awaiting_approval', 'sent', 'ready')
+    where a.status in ('received', 'triaged', 'awaiting_approval', 'sent', 'ready')
       and d.verdict in ${sql(verdicts)}
       and a.id <> ${excludeAskId}`;
+  // 'received' + a decision = decided but still drafting: it already holds its evening / wildcard.
+}
+
+/**
+ * Runs fn while holding a Postgres session advisory lock, so decisions are made one at a time
+ * across every process that shares the database.
+ */
+export async function withDecisionLock<T>(fn: () => Promise<T>): Promise<T> {
+  const conn = await sql.reserve();
+  try {
+    await conn`select pg_advisory_lock(hashtext('fewer:decide'))`;
+    try {
+      return await fn();
+    } finally {
+      await conn`select pg_advisory_unlock(hashtext('fewer:decide'))`;
+    }
+  } finally {
+    conn.release();
+  }
 }
 
 export async function listRatings(): Promise<Rating[]> {
@@ -433,7 +452,7 @@ export async function asksNeedingCheckin(): Promise<{ id: string; parsed: Parsed
     join lateral (
       select verdict from decisions x where x.ask_id = a.id order by x.id desc limit 1
     ) d on true
-    where a.status = 'sent'
+    where a.status in ('sent', 'ready')
       and d.verdict in ('YES', 'WILDCARD')
       and not exists (select 1 from checkins c where c.ask_id = a.id)
     order by a.received_at asc`;

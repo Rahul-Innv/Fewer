@@ -404,9 +404,14 @@ export async function triage(askId: string): Promise<void> {
     const claims = parsed.containsInstructionsToAgent ? [] : await research.researchAsk(parsed);
     await db.saveEvidence(askId, claims);
 
-    const ctx = await buildContext(askId, parsed, c.tz);
-    const decision: Decision = decide(parsed, fits, claims, journeys, boundaries, ctx);
-    await db.saveDecision(askId, decision, fits);
+    // Decide one ask at a time across processes (Fly worker + Desk server): parallel triages would
+    // otherwise all read the same evening count / wildcard flag and could break absolute caps.
+    const decision: Decision = await db.withDecisionLock(async () => {
+      const ctx = await buildContext(askId, parsed, c.tz);
+      const d = decide(parsed, fits, claims, journeys, boundaries, ctx);
+      await db.saveDecision(askId, d, fits);
+      return d;
+    });
     log(`ask ${askId} decided: ${decision.verdict} (${decision.rule}), ${claims.length} claim(s)`);
 
     if (decision.verdict === "BLOCKED") {
@@ -848,7 +853,7 @@ export interface MorningBriefFacts {
 }
 
 /** Statuses the rules (buildContext) count toward the weekly evenings cap. */
-const CAP_STATUSES = new Set(["triaged", "awaiting_approval", "sent"]);
+const CAP_STATUSES = new Set(["received", "triaged", "awaiting_approval", "sent", "ready"]);
 /** Statuses where the owner has said yes: the commitment is real. */
 const APPROVED_STATUSES = new Set(["sent", "ready"]);
 const BRIEF_TITLES_SHOWN = 5;
