@@ -178,6 +178,33 @@
       ],
       "ctx": { "wildcardUsedThisWeek": true },
       "expect": { "verdict": "NO", "rule": "R6", "reasonIncludes": "You rated a panel 2/5 on Oct 4" }
+    },
+    {
+      "name": "private coffee that fits a top goal is a YES: a private meeting needs no web corroboration",
+      "ask": {
+        "id": "a13", "from": "sam@founder.co", "subject": "Coffee this Friday?", "kind": "meeting",
+        "title": "Coffee near SoMa to swap notes on personal AI agents", "tag": "coffee",
+        "startsAt": "2026-10-09T15:00:00-07:00", "durationMin": 45,
+        "inPerson": true, "containsInstructionsToAgent": false
+      },
+      "fits": [
+        { "journeyId": "j1", "score": 2, "reason": "swap notes on personal AI agents with another builder" },
+        { "journeyId": "j2", "score": 1, "reason": "some agent-engineering talk" },
+        { "journeyId": "j3", "score": 0, "reason": "no running link" }
+      ],
+      "claims": [],
+      "expect": { "verdict": "YES", "rule": "R3", "reasonIncludes": "Ship Fewer to 100 users", "hours": 1.5 }
+    },
+    {
+      "name": "public event with a strong fit but zero verified claims is still a NO: events still require web corroboration",
+      "ask": {
+        "id": "a14", "from": "host@agentsnight.dev", "subject": "Agents demo night", "kind": "event",
+        "title": "Agents demo night", "tag": "meetup", "startsAt": "2026-10-08T13:00:00-07:00", "durationMin": 60,
+        "inPerson": false, "containsInstructionsToAgent": false
+      },
+      "fits": [{ "journeyId": "j2", "score": 3, "reason": "live agent demos" }],
+      "claims": [],
+      "expect": { "verdict": "NO", "rule": "R6", "reasonIncludes": "none of its claims checked out on 2+ independent sites" }
     }
   ]
 }

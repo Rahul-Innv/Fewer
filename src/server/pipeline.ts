@@ -343,7 +343,7 @@ async function handleCheckinReply(msg: InboundMessage, checkin: db.CheckinRow): 
 // triage
 // ---------------------------------------------------------------------------
 
-async function buildContext(askId: string, parsed: ParsedAsk, tz: string): Promise<DecisionContext> {
+export async function buildContext(askId: string, parsed: ParsedAsk, tz: string): Promise<DecisionContext> {
   const nowIso = new Date().toISOString();
   // The cap applies to the week the event happens in (falls back to the current week).
   const targetKey = weekKey(parsed.startsAt ?? nowIso, tz) ?? weekKey(nowIso, tz);
@@ -386,7 +386,7 @@ export async function triage(askId: string): Promise<void> {
     const parsedOut = await llm.parseAsk(
       {
         messageId: ask.inbox_message_id,
-        from: ask.from_email,
+        from: senderForModel(ask.from_email),
         fromName: ask.from_name ?? undefined,
         subject: ask.subject ?? "",
         text: ask.raw_text ?? "",
@@ -395,7 +395,9 @@ export async function triage(askId: string): Promise<void> {
       },
       journeys,
     );
-    const parsed: ParsedAsk = { ...parsedOut.ask, id: askId, from: ask.from_email };
+    // Copy-only Desk asks have no sender: give the parser a clearly non-deliverable placeholder. The
+    // draft keeps the real (empty) address, so approving it stays copy-only and never sends.
+    const parsed: ParsedAsk = { ...parsedOut.ask, id: askId, from: senderForModel(ask.from_email) };
     const fits = parsedOut.fits;
     await db.saveParsed(askId, parsed);
     log(`ask ${askId} parsed: ${parsed.kind} "${parsed.title}"`);
@@ -425,7 +427,7 @@ export async function triage(askId: string): Promise<void> {
       id: shortId("drf"),
       askId,
       toEmail: ask.from_email,
-      replyToMessageId: isWebAsk(ask.inbox_message_id) ? null : ask.inbox_message_id,
+      replyToMessageId: isWebAsk(ask.inbox_message_id) || isDemoAsk(ask.inbox_message_id) ? null : ask.inbox_message_id,
       body: draft.body,
       kind: decision.verdict === "ASK_ONE" ? "question" : "reply",
     });
@@ -466,8 +468,15 @@ async function freshCode(): Promise<string> {
 
 async function sendBriefInner(askIds?: string[]): Promise<{ approvalId: string; code: string } | null> {
   const c = cfg();
-  const drafts = await db.draftsAwaitingBrief(askIds);
+  const all = await db.draftsAwaitingBrief(askIds);
+  const asksById = new Map((await Promise.all(all.map((d) => db.getAsk(d.ask_id)))).filter(Boolean).map((a) => [a!.id, a!]));
+  const isDemoDraft = (d: { ask_id: string }) => isDemoAsk(asksById.get(d.ask_id)?.inbox_message_id ?? "");
+  // An unscoped (worker) brief never picks up demo drafts; the Desk's demo run briefs its own asks.
+  const drafts = askIds && askIds.length > 0 ? all : all.filter((d) => !isDemoDraft(d));
   if (drafts.length === 0) return null;
+  // Desk-only: every draft is a demo draft or has no deliverable address (copy-only). No brief email;
+  // the Desk approval card is the approval path (also avoids one email per pasted calendar event).
+  const demoOnly = drafts.every((d) => isDemoDraft(d) || !EMAIL_RE.test(d.to_email));
   const blocked = askIds && askIds.length > 0 ? [] : await db.unlistedBlockedAsks();
 
   const items: BriefItem[] = [];
@@ -497,6 +506,14 @@ async function sendBriefInner(askIds?: string[]): Promise<{ approvalId: string; 
     draftIds: sortedIds,
     expiresAt: new Date(Date.now() + APPROVAL_TTL_MIN * 60_000),
   });
+
+  if (demoOnly) {
+    // Demo: no email at all. The Desk's approval card is the approval path.
+    await db.logEvent("brief", null, { approvalId, drafts: sortedIds.length, demo: true });
+    await db.setAskStatuses(drafts.map((d) => d.ask_id), "awaiting_approval");
+    log(`demo brief ready on the Desk: ${drafts.length} draft(s), no email (approval ${approvalId})`);
+    return { approvalId, code };
+  }
 
   const { subject, text } = formatBrief({ code, items, blocked: blockedItems });
   let sent: { messageId: string; threadId: string };
@@ -530,7 +547,7 @@ export async function approveByCode(
   code: string,
   via: "email" | "desk",
   opts: { replyToMessageId?: string } = {},
-): Promise<{ ok: boolean; reason: string; sent: number }> {
+): Promise<{ ok: boolean; reason: string; sent: number; simulated?: number }> {
   const normalized = code.trim().toUpperCase();
   const approval = await db.findPendingApprovalByCode(normalized);
   if (!approval) return { ok: false, reason: "no pending approval with that code", sent: 0 };
@@ -555,12 +572,27 @@ export async function approveByCode(
   const c = cfg();
   let sent = 0;
   let failed = 0;
+  let simulated = 0;
+  const demoReplies: { to: string; subject: string; body: string }[] = [];
   const receipts: string[] = [];
   for (const d of drafts) {
     // Ledger row first; a conflict means this (approval, draft) was already handled.
     const won = await db.claimAction(approval.id, d.id);
     if (!won) continue;
     try {
+      const askRow = await db.getAsk(d.ask_id);
+      if (askRow && isDemoAsk(askRow.inbox_message_id)) {
+        // Demo ask: same claim + hash + single-use path, but nothing is emailed.
+        await db.finishAction(approval.id, d.id, { status: "simulated" });
+        await db.setAskStatus(d.ask_id, "simulated");
+        simulated += 1;
+        demoReplies.push({
+          to: askRow.from_name ? `${askRow.from_name} <${askRow.from_email}>` : askRow.from_email,
+          subject: `Re: ${askRow.subject || "your note"}`,
+          body: d.body,
+        });
+        continue;
+      }
       const idempotencyKey = `${approval.id}.${d.id}`;
       if (!d.reply_to_message_id && !EMAIL_RE.test(d.to_email)) {
         // A Desk ask with no address: approved, but nothing is sent. The owner copies it.
@@ -589,7 +621,35 @@ export async function approveByCode(
       await db.logEvent("error", d.ask_id, { stage: "send", error: errMsg(e) });
     }
   }
-  log(`approval ${approval.id} via ${via}: sent ${sent}, failed ${failed}`);
+  log(`approval ${approval.id} via ${via}: sent ${sent}, failed ${failed}, simulated ${simulated}`);
+  if (simulated > 0 && sent === 0 && failed === 0) {
+    const replies = `${simulated} repl${simulated === 1 ? "y" : "ies"}`;
+    const recipient = process.env.DEMO_RECIPIENT?.trim();
+    await db.logEvent("approved_demo", null, { approvalId: approval.id, simulated });
+    if (!recipient) {
+      return { ok: true, reason: `Demo: ${replies} would be sent. Nothing was emailed.`, sent: 0, simulated };
+    }
+    // ONE digest to the owner, never to the fictional senders. Keyed by approval: sent once.
+    const text = [
+      `Fewer demo: you approved ${replies}. These are the emails Fewer would send. Nobody else was emailed.`,
+      "",
+      ...demoReplies.flatMap((r) => [`To: ${r.to}`, `Subject: ${r.subject}`, "", r.body, "", "----", ""]),
+    ].join("\n");
+    try {
+      const r = await mail.sendMail({
+        inboxId: c.inbox,
+        to: [recipient],
+        subject: `[Fewer demo] ${replies} Fewer would send`,
+        text,
+        idempotencyKey: `demo-digest.${approval.id}`,
+      });
+      await db.logEvent("demo_digest", null, { approvalId: approval.id, messageId: r.messageId, replies: simulated, demo: true });
+      return { ok: true, reason: `Demo: ${replies} sent to your work inbox for review. Nobody else was emailed.`, sent: 0, simulated };
+    } catch (e) {
+      await db.logEvent("error", null, { stage: "demo_digest", approvalId: approval.id, error: errMsg(e) });
+      return { ok: false, reason: `Demo: approved, but the review email to your inbox failed. Nobody else was emailed.`, sent: 0, simulated };
+    }
+  }
 
   const receipt =
     `Sent ${sent} repl${sent === 1 ? "y" : "ies"}.` +
@@ -681,8 +741,35 @@ export async function timeSkipCheckins(): Promise<number> {
 
 const EMAIL_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
 
+/** The sender handed to the parser: the real address, or a non-deliverable placeholder for copy-only asks. */
+export const NO_SENDER = "you@desk.local";
+export function senderForModel(fromEmail: string | null | undefined): string {
+  return fromEmail && EMAIL_RE.test(fromEmail) ? fromEmail : NO_SENDER;
+}
+
 export function isWebAsk(inboxMessageId: string): boolean {
   return inboxMessageId.startsWith("web-");
+}
+
+/** Asks created by the Desk's "Run demo": never emailed, approval is simulated. */
+export function isDemoAsk(inboxMessageId: string): boolean {
+  return inboxMessageId.startsWith("demo-");
+}
+
+/** Records one demo ask (no email), the same way a Desk paste is recorded. */
+export async function submitDemoAsk(i: { subject: string; text: string; fromEmail: string; fromName: string }): Promise<string> {
+  const askId = shortId("ask");
+  await db.insertAsk({
+    id: askId,
+    inboxMessageId: `demo-${randomUUID()}`,
+    threadId: null,
+    fromEmail: i.fromEmail,
+    fromName: i.fromName,
+    subject: i.subject,
+    rawText: i.text,
+  });
+  await db.logEvent("received", askId, { source: "demo", from: i.fromEmail });
+  return askId;
 }
 
 /**
@@ -853,7 +940,7 @@ export interface MorningBriefFacts {
 }
 
 /** Statuses the rules (buildContext) count toward the weekly evenings cap. */
-const CAP_STATUSES = new Set(["received", "triaged", "awaiting_approval", "sent", "ready"]);
+const CAP_STATUSES = new Set(["received", "triaged", "awaiting_approval", "sent", "ready", "simulated"]);
 /** Statuses where the owner has said yes: the commitment is real. */
 const APPROVED_STATUSES = new Set(["sent", "ready"]);
 const BRIEF_TITLES_SHOWN = 5;

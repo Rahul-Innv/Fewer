@@ -21,6 +21,8 @@ import { corroborate } from "./corroborate";
  * First matching rule wins, after the learned-dislike adjustment:
  *   R0 BLOCKED -> R2 ASK_ONE -> R1 conflict (NO | SMALLER) -> R3 YES
  *   -> R4 SMALLER -> R5 WILDCARD -> R6 NO
+ * Web corroboration (>= 1 verified claim) gates R3 and R5 for public events only.
+ * A private meeting or request has no public listing to check, so it never needs one.
  */
 
 const DAY_ORDER: readonly Weekday[] = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
@@ -230,6 +232,11 @@ export function decide(
   const rankOf = (f: Fit) => journeyById.get(f.journeyId)?.rank;
   const fitLine = (f: Fit) => `Advances ${titleOf(f)} (fit ${f.score}/3)${f.reason ? `: ${f.reason}` : ""}`;
   const verifiedLine = () => `${plural(verified, "claim")} checked out on 2+ independent sites`;
+  // Only public events can be corroborated on the web; a private coffee never can.
+  const needsCorroboration = ask.kind === "event";
+  const corroborated = !needsCorroboration || verified >= 1;
+  // Non-events with nothing verified skip the line rather than print "0 claims checked out".
+  const verifiedLines = () => (needsCorroboration || verified >= 1 ? [verifiedLine()] : []);
 
   const best = bestFit(effectiveFit);
   const maxFit = best?.score ?? 0;
@@ -303,8 +310,8 @@ export function decide(
   const eveningFull = isEvening && eveningCaps.some((c) => ctx.eveningsOutThisWeek >= c.n);
 
   // R3 YES.
-  if (bestTop2 && bestTop2.score >= 2 && verified >= 1 && !eveningFull) {
-    const reasons = [fitLine(bestTop2), verifiedLine()];
+  if (bestTop2 && bestTop2.score >= 2 && corroborated && !eveningFull) {
+    const reasons = [fitLine(bestTop2), ...verifiedLines()];
     const cap = eveningCaps[0];
     if (isEvening && cap) reasons.push(`Uses evening ${ctx.eveningsOutThisWeek + 1} of ${cap.n} this week`);
     return make("YES", "R3", [...reasons, ...softNotes, ...dislikeNote]);
@@ -321,11 +328,11 @@ export function decide(
   }
 
   // R5 WILDCARD: one exploratory yes per week.
-  if (maxFit === 1 && best && verified >= 1 && !ctx.wildcardUsedThisWeek) {
+  if (maxFit === 1 && best && corroborated && !ctx.wildcardUsedThisWeek) {
     return make("WILDCARD", "R5", [
       "One exploratory yes per week",
       `Light link to ${titleOf(best)} (fit 1/3)`,
-      verifiedLine(),
+      ...verifiedLines(),
       ...softNotes,
       ...dislikeNote,
     ]);
@@ -334,7 +341,7 @@ export function decide(
   // R6 NO.
   const rank1 = journeys.find((j) => j.rank === 1);
   const reasons: string[] = [];
-  if (bestTop2 && bestTop2.score >= 2 && verified === 0) {
+  if (bestTop2 && bestTop2.score >= 2 && needsCorroboration && verified === 0) {
     reasons.push(`Fits ${titleOf(bestTop2)}, but none of its claims checked out on 2+ independent sites`);
   } else if (bestTop2 && bestTop2.score >= 2 && eveningFull) {
     const cap = eveningCaps.find((c) => ctx.eveningsOutThisWeek >= c.n);
@@ -343,7 +350,7 @@ export function decide(
     reasons.push(`Only links to your #3 goal, ${titleOf(best)}; yeses go to your top two`);
   } else {
     reasons.push("No link strong enough to your 3 goals");
-    if (maxFit === 1 && verified >= 1 && ctx.wildcardUsedThisWeek) {
+    if (maxFit === 1 && corroborated && ctx.wildcardUsedThisWeek) {
       reasons.push("This week's exploratory yes is already used");
     }
   }

@@ -34,7 +34,7 @@ function client(): Client {
     const url = directDatabaseUrl();
     if (!url) throw new Error("DATABASE_URL is not set");
     const local = /^postgres(?:ql)?:\/\/[^@]*@?(?:localhost|127\.0\.0\.1|\[::1\])[:/]/i.test(url);
-    g.__fewerSql = postgres(url, { max: 5, prepare: false, ssl: local ? false : "require" });
+    g.__fewerSql = postgres(url, { max: 10, prepare: false, ssl: local ? false : "require" });
   }
   return g.__fewerSql;
 }
@@ -73,6 +73,7 @@ export type AskStatus =
   | "awaiting_approval"
   | "sent"
   | "ready" // approved, no address to send to: copy from the Desk
+  | "simulated" // demo ask approved: the send was simulated, nothing emailed
   | "declined"
   | "blocked"
   | "error";
@@ -244,7 +245,7 @@ export async function committedAsks(
     join lateral (
       select verdict from decisions x where x.ask_id = a.id order by x.id desc limit 1
     ) d on true
-    where a.status in ('received', 'triaged', 'awaiting_approval', 'sent', 'ready')
+    where a.status in ('received', 'triaged', 'awaiting_approval', 'sent', 'ready', 'simulated')
       and d.verdict in ${sql(verdicts)}
       and a.id <> ${excludeAskId}`;
   // 'received' + a decision = decided but still drafting: it already holds its evening / wildcard.
@@ -254,8 +255,20 @@ export async function committedAsks(
  * Runs fn while holding a Postgres session advisory lock, so decisions are made one at a time
  * across every process that shares the database.
  */
+const lockState = globalThis as unknown as { __fewerLockSql?: Client };
+/** Lock holders get their own small pool, so many waiting triages can never starve the main pool. */
+function lockClient(): Client {
+  if (!lockState.__fewerLockSql) {
+    const url = directDatabaseUrl();
+    if (!url) throw new Error("DATABASE_URL is not set");
+    const local = /@(localhost|127.0.0.1|[::1])[:/]/i.test(url);
+    lockState.__fewerLockSql = postgres(url, { max: 12, prepare: false, ssl: local ? false : "require" });
+  }
+  return lockState.__fewerLockSql;
+}
+
 export async function withDecisionLock<T>(fn: () => Promise<T>): Promise<T> {
-  const conn = await sql.reserve();
+  const conn = await lockClient().reserve();
   try {
     await conn`select pg_advisory_lock(hashtext('fewer:decide'))`;
     try {
@@ -312,7 +325,7 @@ export async function draftsAwaitingBrief(askIds?: string[]): Promise<DraftRow[]
     ) d
     join asks a on a.id = d.ask_id
     where ${scoped ? sql`d.ask_id in ${sql(askIds!)}` : sql`a.status in ('triaged', 'awaiting_approval')`}
-      and not exists (select 1 from actions ac where ac.draft_id = d.id and ac.status in ('sending', 'sent'))
+      and not exists (select 1 from actions ac where ac.draft_id = d.id and ac.status in ('sending', 'sent', 'ready', 'simulated'))
       and not exists (
         select 1 from approvals ap
         where ap.draft_ids @> to_jsonb(d.id)
@@ -410,8 +423,12 @@ export async function claimAction(approvalId: string, draftId: string): Promise<
 export async function finishAction(
   approvalId: string,
   draftId: string,
-  r: { status: "sent"; sentMessageId: string } | { status: "failed"; error: string } | { status: "ready" },
+  r: { status: "sent"; sentMessageId: string } | { status: "failed"; error: string } | { status: "ready" } | { status: "simulated" },
 ): Promise<void> {
+  if (r.status === "simulated") {
+    await sql`update actions set status = 'simulated' where approval_id = ${approvalId} and draft_id = ${draftId}`;
+    return;
+  }
   if (r.status === "ready") {
     // Approved, but there is no address to send to: the owner copies the reply from the Desk.
     await sql`update actions set status = 'ready' where approval_id = ${approvalId} and draft_id = ${draftId}`;
