@@ -151,7 +151,8 @@ Never run the local worker and `worker=1` at the same time.
 
 - **devDependencies stay in the runtime image** (hackathon): the worker is TypeScript run by `tsx`, a
   devDependency. The cleaner follow-up is to move `tsx` to `dependencies` and `npm prune --omit=dev`
-  after `npm run build`; that needs a `package.json` change, so it was not done here.
+  after `npm run build`; that needs a `package.json` change, so it was not done here. The image built
+  locally at about 2.2 GB, so expect the first remote build and push to take several minutes.
 - The image runs as the non-root `node` user and contains no env values or secrets.
 - `kill_signal = "SIGTERM"`: both `next start` and `scripts/worker.ts` shut down cleanly on it.
 - VM size is `shared-cpu-1x` with 1 GB per group; Next plus Mastra plus the AI SDK are too heavy for

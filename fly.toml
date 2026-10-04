@@ -1,6 +1,6 @@
 # Fewer on Fly.io. One image, two process groups. Steps: docs/DEPLOY.md.
 # `app` is a placeholder: app names are global on Fly, so change it to something free.
-app = "fewer"
+app = "fewer-rk"
 primary_region = "sjc"
 
 # Fly's default stop signal is SIGINT; both Next and scripts/worker.ts handle SIGTERM cleanly.
