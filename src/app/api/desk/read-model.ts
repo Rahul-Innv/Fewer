@@ -11,6 +11,7 @@ import type {
   PendingApprovalView,
 } from "@/components/desk/types";
 import { savedHoursForSmaller } from "@/components/desk/format";
+import { calendarWindow, listBusyBlocks, type BusyBlock } from "@/server/calendar";
 
 /**
  * The Desk read model. Reads the tables directly with `sql` and assembles one JSON document.
@@ -84,13 +85,15 @@ function evidenceChips(claims: EvidenceClaim[] | null | undefined): EvidenceChip
   return [...byDomain.values()].slice(0, 6);
 }
 
-function statusFor(ask: AskRow, verdict: Verdict | null, sentAt: string | null): { status: CardStatus; label: string } {
+function statusFor(ask: AskRow, verdict: Verdict | null, sentAt: string | null, hasDraft = true): { status: CardStatus; label: string } {
   if (verdict === "BLOCKED" || ask.status === "blocked") return { status: "blocked", label: "Blocked. Nothing sent." };
   switch (ask.status) {
     case "sent":
       return { status: "sent", label: "Sent" };
     case "ready":
-      return { status: "ready", label: "Approved. Ready to copy; Fewer sent nothing." };
+      return hasDraft
+        ? { status: "ready", label: "Ready to copy if you want it. Fewer sends nothing." }
+        : { status: "ready", label: "Decided. Nobody to reply to, so nothing to send." };
     case "simulated":
       return { status: "sent", label: "Demo: approved. This reply would be sent; nothing was emailed." };
     case "awaiting_approval":
@@ -116,25 +119,26 @@ export async function buildDesk(): Promise<DeskData> {
   try {
     const env = envInfo();
 
-    const journeyRows = await sql<{ id: string; rank: number; title: string }[]>`
-      select id, rank, title from journeys order by rank asc`;
-    const boundaryRows = await sql<{ id: string; strength: string; label: string }[]>`
-      select id, strength, label from boundaries
-      order by case strength when 'absolute' then 0 when 'ask_first' then 1 else 2 end, id`;
+    // Two parallel waves instead of ~10 sequential round trips to the database.
+    const ASK_LIMIT = 150; // a full Tech Week of asks fits
+    const [journeyRows, boundaryRows, weekRows, askRows, commitments] = await Promise.all([
+      sql<{ id: string; rank: number; title: string }[]>`
+        select id, rank, title from journeys order by rank asc`,
+      sql<{ id: string; strength: string; label: string }[]>`
+        select id, strength, label from boundaries
+        order by case strength when 'absolute' then 0 when 'ask_first' then 1 else 2 end, id`,
+      sql<{ week_start: Date }[]>`
+        select (date_trunc('week', now() at time zone ${env.timeZone}::text) at time zone ${env.timeZone}::text) as week_start`.catch(
+        () => [] as { week_start: Date }[],
+      ),
+      sql<AskRow[]>`
+        select id, from_email, from_name, subject, received_at, parsed, status, inbox_message_id
+        from asks order by received_at desc, id desc limit ${ASK_LIMIT}`,
+      // Busy TIMES only (no titles): this week from Monday through the next 7 days.
+      listBusyBlocks(calendarWindow(new Date(), env.timeZone)).catch(() => [] as BusyBlock[]),
+    ]);
     const journeyById = new Map(journeyRows.map((j) => [j.id, j]));
-
-    let weekStart: Date;
-    try {
-      const [w] = await sql<{ week_start: Date }[]>`
-        select (date_trunc('week', now() at time zone ${env.timeZone}::text) at time zone ${env.timeZone}::text) as week_start`;
-      weekStart = w.week_start;
-    } catch {
-      weekStart = new Date(Date.now() - 7 * 24 * 3600 * 1000);
-    }
-
-    const askRows = await sql<AskRow[]>`
-      select id, from_email, from_name, subject, received_at, parsed, status, inbox_message_id
-      from asks order by received_at desc, id desc limit 40`;
+    const weekStart: Date = weekRows[0]?.week_start ?? new Date(Date.now() - 7 * 24 * 3600 * 1000);
     const askIds = askRows.map((a) => a.id);
 
     let decisions: DecisionRow[] = [];
@@ -145,30 +149,35 @@ export async function buildDesk(): Promise<DeskData> {
     let outcomeByAsk = new Map<string, { rating: number; note: string | null; result: string | null; at: string }>();
 
     if (askIds.length > 0) {
-      decisions = await sql<DecisionRow[]>`
-        select distinct on (ask_id) ask_id, verdict, rule, decision, fits, created_at
-        from decisions where ask_id in ${sql(askIds)}
-        order by ask_id, created_at desc, id desc`;
-      evidence = await sql<EvidenceRow[]>`
-        select distinct on (ask_id) ask_id, claims
-        from evidence where ask_id in ${sql(askIds)}
-        order by ask_id, created_at desc, id desc`;
-      drafts = await sql<DraftRow[]>`
-        select distinct on (ask_id) id, ask_id, to_email, body, kind
-        from drafts where ask_id in ${sql(askIds)}
-        order by ask_id, created_at desc, id desc`;
-      if (drafts.length > 0) {
-        actions = await sql<ActionRow[]>`
-          select distinct on (draft_id) draft_id, status, created_at
-          from actions where draft_id in ${sql(drafts.map((d) => d.id))}
-          order by draft_id, created_at desc, id desc`;
-      }
-      const checkins = await sql<{ ask_id: string }[]>`select ask_id from checkins where ask_id in ${sql(askIds)}`;
+      const [dec, ev, dr, ac, checkins, outs] = await Promise.all([
+        sql<DecisionRow[]>`
+          select distinct on (ask_id) ask_id, verdict, rule, decision, fits, created_at
+          from decisions where ask_id in ${sql(askIds)}
+          order by ask_id, created_at desc, id desc`,
+        sql<EvidenceRow[]>`
+          select distinct on (ask_id) ask_id, claims
+          from evidence where ask_id in ${sql(askIds)}
+          order by ask_id, created_at desc, id desc`,
+        sql<DraftRow[]>`
+          select distinct on (ask_id) id, ask_id, to_email, body, kind
+          from drafts where ask_id in ${sql(askIds)}
+          order by ask_id, created_at desc, id desc`,
+        sql<ActionRow[]>`
+          select distinct on (ac.draft_id) ac.draft_id, ac.status, ac.created_at
+          from actions ac join drafts d on d.id = ac.draft_id
+          where d.ask_id in ${sql(askIds)}
+          order by ac.draft_id, ac.created_at desc, ac.id desc`,
+        sql<{ ask_id: string }[]>`select ask_id from checkins where ask_id in ${sql(askIds)}`,
+        sql<{ ask_id: string; rating: number | null; note: string | null; result: string | null; at: Date }[]>`
+          select distinct on (ask_id) ask_id, rating, note, result, at
+          from outcomes where ask_id in ${sql(askIds)} and rating is not null
+          order by ask_id, at desc, id desc`,
+      ]);
+      decisions = dec;
+      evidence = ev;
+      drafts = dr;
+      actions = ac;
       checkinAskIds = new Set(checkins.map((c) => c.ask_id));
-      const outs = await sql<{ ask_id: string; rating: number | null; note: string | null; result: string | null; at: Date }[]>`
-        select distinct on (ask_id) ask_id, rating, note, result, at
-        from outcomes where ask_id in ${sql(askIds)} and rating is not null
-        order by ask_id, at desc, id desc`;
       outcomeByAsk = new Map(
         outs.map((o) => [o.ask_id, { rating: Number(o.rating), note: o.note, result: o.result, at: iso(o.at) }]),
       );
@@ -205,7 +214,7 @@ export async function buildDesk(): Promise<DeskData> {
       const draft = draftByAsk.get(a.id) ?? null;
       const action = draft ? actionByDraft.get(draft.id) : undefined;
       const sentAt = action && action.status === "sent" ? iso(action.created_at) : null;
-      const st = statusFor(a, verdict, sentAt);
+      const st = statusFor(a, verdict, sentAt, Boolean(draft));
 
       // Ledger: latest decision per ask, made this week.
       if (dec && verdict && new Date(dec.created_at) >= weekStart) {
@@ -258,25 +267,29 @@ export async function buildDesk(): Promise<DeskData> {
 
     // Pending approvals: the newest live one and the newest demo one, never mixed (demo asks have
     // inbox ids "demo-%"; sendBrief never puts demo and live drafts in one approval).
-    let pending: PendingApprovalView | null = null;
-    let pendingDemo: PendingApprovalView | null = null;
-    const aps = await sql<{ id: string; code: string; draft_ids: string[] | null; expires_at: Date | null; created_at: Date }[]>`
-      select id, code, draft_ids, expires_at, created_at from approvals
-      where status = 'pending' and (expires_at is null or expires_at > now())
-      order by created_at desc limit 10`;
-    for (const ap of aps) {
-      if (pending && pendingDemo) break;
+    type ApRow = { id: string; code: string; draft_ids: string[] | null; expires_at: Date | null; created_at: Date; demo: boolean };
+    // One query classifies each live approval as demo or live; then at most two draft lookups, in parallel.
+    const aps = await sql<ApRow[]>`
+      select ap.id, ap.code, ap.draft_ids, ap.expires_at, ap.created_at,
+             coalesce(bool_and(a.inbox_message_id like 'demo-%'), false) as demo
+      from approvals ap
+      left join lateral jsonb_array_elements_text(ap.draft_ids) x(id) on true
+      left join drafts d on d.id = x.id
+      left join asks a on a.id = d.ask_id
+      where ap.status = 'pending' and (ap.expires_at is null or ap.expires_at > now())
+      group by ap.id
+      order by ap.created_at desc
+      limit 50`;
+    const toView = async (ap: ApRow | undefined): Promise<PendingApprovalView | null> => {
+      if (!ap) return null;
       const ids = Array.isArray(ap.draft_ids) ? ap.draft_ids : [];
       const rows = ids.length
-        ? await sql<{ id: string; to_email: string; kind: string; body: string; subject: string | null; title: string | null; demo: boolean }[]>`
-            select d.id, d.to_email, d.kind, d.body, a.subject, a.parsed->>'title' as title,
-                   coalesce(a.inbox_message_id like 'demo-%', false) as demo
+        ? await sql<{ id: string; to_email: string; kind: string; body: string; subject: string | null; title: string | null }[]>`
+            select d.id, d.to_email, d.kind, d.body, a.subject, a.parsed->>'title' as title
             from drafts d left join asks a on a.id = d.ask_id
             where d.id in ${sql(ids)} order by d.id asc`
         : [];
-      const isDemo = rows.length > 0 && rows.every((r) => r.demo);
-      if (isDemo ? pendingDemo : pending) continue;
-      const view: PendingApprovalView = {
+      return {
         id: ap.id,
         code: ap.code,
         expiresAt: ap.expires_at ? iso(ap.expires_at) : null,
@@ -289,9 +302,11 @@ export async function buildDesk(): Promise<DeskData> {
           body: r.body,
         })),
       };
-      if (isDemo) pendingDemo = view;
-      else pending = view;
-    }
+    };
+    const [pending, pendingDemo] = await Promise.all([
+      toView(aps.find((a) => !a.demo)),
+      toView(aps.find((a) => a.demo)),
+    ]);
 
     const outcomeRows = await sql<
       { id: string | number; tag: string | null; rating: number; result: string | null; note: string | null; at: Date; title: string | null; subject: string | null }[]
@@ -325,6 +340,7 @@ export async function buildDesk(): Promise<DeskData> {
       asks: cards,
       outcomes,
       checkinsSent: Number(checkinsSent) || 0,
+      commitments,
     };
   } catch (e) {
     return emptyDesk(friendlyDbError(e), true);

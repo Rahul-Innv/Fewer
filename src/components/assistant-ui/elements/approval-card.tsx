@@ -117,7 +117,7 @@ export function ApprovalCard({
       data-slot="approval-card"
       aria-labelledby={titleId}
       aria-describedby={description ? descriptionId : undefined}
-      className={cn(paper, "flex w-full flex-col overflow-hidden rounded-2xl", className)}
+      className={cn(paper, "flex w-full flex-col overflow-hidden rounded-[20px]", className)}
     >
       <div className="flex items-start gap-3 px-4 pb-3 pt-4 sm:px-5">
         <span
@@ -128,7 +128,7 @@ export function ApprovalCard({
               ? "bg-blocked-bg text-blocked-fg"
               : inactive
                 ? "bg-no-bg text-no-fg"
-                : "bg-askone-bg text-askone-fg",
+                : "bg-ink text-action-ink",
           )}
         >
           {icon ?? <TerminalIcon className="size-4" />}

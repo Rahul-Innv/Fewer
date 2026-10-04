@@ -11,7 +11,9 @@ import {
 } from "../core";
 import type { Boundary, Decision, DecisionContext, ParsedAsk } from "../core";
 import { formatHours, plural, savedHoursForSmaller } from "../components/desk/format";
+import { takenBlocksFor } from "./calendar";
 import * as db from "./db";
+import { renderDigestHtml } from "./email-html";
 import * as mail from "./mail";
 
 // Loaded lazily so Desk API routes (approve/decline/time-skip) don't pull Mastra/Exa into their bundles.
@@ -343,7 +345,16 @@ async function handleCheckinReply(msg: InboundMessage, checkin: db.CheckinRow): 
 // triage
 // ---------------------------------------------------------------------------
 
-export async function buildContext(askId: string, parsed: ParsedAsk, tz: string): Promise<DecisionContext> {
+/**
+ * Rules context for one ask. `ignoreAskIds`: open asks a re-decide pass has not reached yet; they do not
+ * count as taken time, so the best ask in a slot (re-decided first) is not blocked by a weaker one.
+ */
+export async function buildContext(
+  askId: string,
+  parsed: ParsedAsk,
+  tz: string,
+  opts: { ignoreAskIds?: ReadonlySet<string> } = {},
+): Promise<DecisionContext> {
   const nowIso = new Date().toISOString();
   // The cap applies to the week the event happens in (falls back to the current week).
   const targetKey = weekKey(parsed.startsAt ?? nowIso, tz) ?? weekKey(nowIso, tz);
@@ -358,12 +369,17 @@ export async function buildContext(askId: string, parsed: ParsedAsk, tz: string)
     if (a.verdict === "WILDCARD") wildcard = true;
     if (isEveningOut(a.parsed, tz)) evenings += 1;
   }
+  const [ratings, takenBlocks] = await Promise.all([
+    db.listRatings(),
+    takenBlocksFor(askId, parsed, opts.ignoreAskIds),
+  ]);
   return {
     now: nowIso,
     timeZone: tz,
     eveningsOutThisWeek: evenings,
     wildcardUsedThisWeek: wildcard,
-    ratings: await db.listRatings(),
+    ratings,
+    ...(takenBlocks.length > 0 ? { takenBlocks } : {}),
   };
 }
 
@@ -422,6 +438,15 @@ export async function triage(askId: string): Promise<void> {
       return;
     }
 
+    // Copy-only Desk ask (no sender address) that Fewer declines: there is nobody to reply to.
+    const copyOnly = !EMAIL_RE.test(ask.from_email ?? "") && !isDemoAsk(ask.inbox_message_id);
+    if (copyOnly && decision.verdict === "NO") {
+      await db.setAskStatus(askId, "ready");
+      await db.logEvent("triaged", askId, { verdict: decision.verdict, rule: decision.rule, copyOnly: true, drafted: false });
+      log(`ask ${askId} decided (copy-only, no draft needed)`);
+      return;
+    }
+
     const draft = await llm.draftReply({ ask: parsed, decision, ownerName: c.ownerName });
     await db.saveDraft({
       id: shortId("drf"),
@@ -472,11 +497,13 @@ async function sendBriefInner(askIds?: string[]): Promise<{ approvalId: string; 
   const asksById = new Map((await Promise.all(all.map((d) => db.getAsk(d.ask_id)))).filter(Boolean).map((a) => [a!.id, a!]));
   const isDemoDraft = (d: { ask_id: string }) => isDemoAsk(asksById.get(d.ask_id)?.inbox_message_id ?? "");
   // An unscoped (worker) brief never picks up demo drafts; the Desk's demo run briefs its own asks.
-  const drafts = askIds && askIds.length > 0 ? all : all.filter((d) => !isDemoDraft(d));
+  // Copy-only drafts (no deliverable address, not demo) never enter an approval: nothing would be sent.
+  const sendable = all.filter((d) => isDemoDraft(d) || EMAIL_RE.test(d.to_email));
+  const drafts = askIds && askIds.length > 0 ? sendable : sendable.filter((d) => !isDemoDraft(d));
   if (drafts.length === 0) return null;
   // Desk-only: every draft is a demo draft or has no deliverable address (copy-only). No brief email;
   // the Desk approval card is the approval path (also avoids one email per pasted calendar event).
-  const demoOnly = drafts.every((d) => isDemoDraft(d) || !EMAIL_RE.test(d.to_email));
+  const demoOnly = drafts.every(isDemoDraft);
   const blocked = askIds && askIds.length > 0 ? [] : await db.unlistedBlockedAsks();
 
   const items: BriefItem[] = [];
@@ -635,12 +662,14 @@ export async function approveByCode(
       "",
       ...demoReplies.flatMap((r) => [`To: ${r.to}`, `Subject: ${r.subject}`, "", r.body, "", "----", ""]),
     ].join("\n");
+    const html = renderDigestHtml(demoReplies);
     try {
       const r = await mail.sendMail({
         inboxId: c.inbox,
         to: [recipient],
         subject: `[Fewer demo] ${replies} Fewer would send`,
         text,
+        html,
         idempotencyKey: `demo-digest.${approval.id}`,
       });
       await db.logEvent("demo_digest", null, { approvalId: approval.id, messageId: r.messageId, replies: simulated, demo: true });
@@ -803,7 +832,10 @@ export async function submitWebAsk(i: {
 export async function runWebAsk(askId: string): Promise<void> {
   await triage(askId);
   const ask = await db.getAsk(askId);
-  if (ask?.status === "triaged") await sendBrief([askId]);
+  if (ask?.status !== "triaged") return;
+  // Copy-only (no sender address): decided, the reply is there to copy; no approval needed.
+  if (!EMAIL_RE.test(ask.from_email ?? "")) await db.setAskStatus(askId, "ready");
+  else await sendBrief([askId]);
 }
 
 // ---------------------------------------------------------------------------

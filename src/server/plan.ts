@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import type { Decision, ParsedAsk } from "../core";
 import { logEvent, sql } from "./db";
+import { renderPlanHtml, stripDashes } from "./email-html";
 import { sendMail } from "./mail";
 
 /**
- * "Email me my plan": one plain-text email, to the owner's own inbox only, summarising what Fewer
- * has decided so far. Pure parts (buildPlan, formatPlanEmail, planIdempotencyKey, assertOnlyRecipient)
+ * "Email me my plan": one multipart email (HTML plus plain text, see email-html.ts), to the owner's own
+ * inbox only, summarising what Fewer has decided so far. Pure parts (buildPlan, formatPlanEmail, planIdempotencyKey, assertOnlyRecipient)
  * are unit-tested; emailPlan is the orchestration the route calls.
  *
  * Safety: the only address this ever mails is DEMO_RECIPIENT. Fictional demo senders and real
@@ -32,6 +33,8 @@ export interface PlanGoing {
   location: string;
   url: string;
   reason: string;
+  /** Set only for the one wildcard, so the HTML email can show a WILDCARD chip instead of YES. */
+  verdict?: "WILDCARD";
 }
 export interface PlanSmaller {
   title: string;
@@ -52,28 +55,11 @@ export interface Plan {
 
 // ---------- pure: dashes ----------
 
-const DASH_CLASS = String.raw`[\u2012-\u2015]`; // figure dash, en dash, em dash, horizontal bar
-const AMPM = String.raw`[ \t]?[ap]\.?m\.?`;
-
 /**
- * Local dash sanitizer (this module must stay free of server-only imports). No em dash or en dash
- * survives: a spaced dash becomes a comma ("a, b"), digit ranges (5 dash 6, 5 PM dash 6 PM) become "5 to 6", anything else ", ".
+ * No em dash or en dash survives in the plan email. The one definition lives in email-html.ts (it
+ * needs it too, and plan.ts imports that file, so it cannot live here without an import cycle).
  */
-export function stripPlanDashes(text: string): string {
-  if (!new RegExp(DASH_CLASS).test(text)) return text;
-  return text
-    .replace(new RegExp(String.raw`^([ \t]*)${DASH_CLASS}+[ \t]*`, "gm"), "$1") // a dash opening a line
-    .replace(new RegExp(String.raw`[ \t]*${DASH_CLASS}+[ \t]*$`, "gm"), "") // a dash closing a line
-    .replace(
-      new RegExp(String.raw`(\d(?:${AMPM})?)[ \t]*${DASH_CLASS}[ \t]*(?=[$€£]?\d)`, "gi"),
-      "$1 to ",
-    )
-    .replace(new RegExp(String.raw`[ \t]*${DASH_CLASS}+[ \t]*`, "g"), ", ")
-    .replace(/,(?:[ \t]*,)+/g, ",")
-    .replace(/[ \t]+,/g, ",")
-    .replace(/,[ \t]*(?=[.!?;:])/g, "")
-    .replace(/(?<=\S)[ \t]{2,}(?=\S)/g, " ");
-}
+export const stripPlanDashes: (text: string) => string = stripDashes;
 
 // ---------- pure: build ----------
 
@@ -137,6 +123,7 @@ export function buildPlan(rows: PlanRow[], tz: string): Plan {
         location: oneLine(parsed?.location) || oneLine(parsed?.organizer),
         url: oneLine(parsed?.url),
         reason: oneLine(row.decision?.reasons?.[0]),
+        ...(verdict === "WILDCARD" ? { verdict } : {}),
         ms,
       });
     } else if (verdict === "SMALLER") {
@@ -151,7 +138,14 @@ export function buildPlan(rows: PlanRow[], tz: string): Plan {
   going.sort(byStart);
   smaller.sort(byStart);
   return {
-    going: going.map((g) => ({ when: g.when, title: g.title, location: g.location, url: g.url, reason: g.reason })),
+    going: going.map((g) => ({
+      when: g.when,
+      title: g.title,
+      location: g.location,
+      url: g.url,
+      reason: g.reason,
+      ...(g.verdict ? { verdict: g.verdict } : {}),
+    })),
     smaller: smaller.map((s) => ({ title: s.title, when: s.when, offer: s.offer })),
     askOne,
     declined,
@@ -160,7 +154,10 @@ export function buildPlan(rows: PlanRow[], tz: string): Plan {
 
 // ---------- pure: format ----------
 
-export function formatPlanEmail(plan: Plan): { subject: string; text: string } {
+export function formatPlanEmail(
+  plan: Plan,
+  opts: { tz?: string; now?: Date } = {},
+): { subject: string; text: string; html: string } {
   const n = plan.going.length;
   const subject = `Your Tech Week plan from Fewer: ${n} event${n === 1 ? "" : "s"}`;
 
@@ -198,12 +195,20 @@ export function formatPlanEmail(plan: Plan): { subject: string; text: string } {
     sections.push(`Fewer said no to ${plan.declined} other ask${plan.declined === 1 ? "" : "s"}.`);
   }
 
-  return { subject: stripPlanDashes(subject), text: stripPlanDashes(sections.join("\n\n")) };
+  return {
+    subject: stripPlanDashes(subject),
+    text: stripPlanDashes(sections.join("\n\n")),
+    html: renderPlanHtml(plan, opts),
+  };
 }
 
-/** Stable per plan content: the same plan dedupes at AgentMail, a changed plan sends fresh. */
-export function planIdempotencyKey(subject: string, text: string): string {
-  return "plan." + createHash("sha256").update(`${subject}\n${text}`).digest("hex").slice(0, 40);
+/**
+ * Stable per plan content: the same plan dedupes at AgentMail, a changed plan sends fresh. The HTML is
+ * part of the hash, so a re-styled email is a fresh send. Without html the key is the old text-only one.
+ */
+export function planIdempotencyKey(subject: string, text: string, html = ""): string {
+  const input = html ? `${subject}\n${text}\n${html}` : `${subject}\n${text}`;
+  return "plan." + createHash("sha256").update(input).digest("hex").slice(0, 40);
 }
 
 // ---------- recipient guard ----------
@@ -257,7 +262,7 @@ export async function emailPlan(scope: PlanScope): Promise<EmailPlanResult> {
     return { ok: false, status: 409, error: "Nothing decided yet to put in a plan." };
   }
 
-  const { subject, text } = formatPlanEmail(plan);
+  const { subject, text, html } = formatPlanEmail(plan, { tz });
   const to = [recipient];
   assertOnlyRecipient(to);
   const sent = await sendMail({
@@ -265,7 +270,8 @@ export async function emailPlan(scope: PlanScope): Promise<EmailPlanResult> {
     to,
     subject,
     text,
-    idempotencyKey: planIdempotencyKey(subject, text),
+    html,
+    idempotencyKey: planIdempotencyKey(subject, text, html),
   });
 
   const counts = { going: plan.going.length, smaller: plan.smaller.length, askOne: plan.askOne.length };

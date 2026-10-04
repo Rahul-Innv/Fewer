@@ -1,20 +1,28 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowRight, Check, Copy, FlaskConical, Inbox, MessageSquareText, TriangleAlert } from "lucide-react";
-import type { Verdict } from "@/core/contracts";
+import { ArrowRight, Check, Copy, FlaskConical, Loader2, MessageSquareText, TriangleAlert } from "lucide-react";
 import type { DeskData } from "./types";
+import type { Verdict } from "@/core/contracts";
 import { VERDICTS } from "./tokens";
 import { ApprovalBanner } from "./ApprovalBanner";
-import { BoundariesPanel, JourneysPanel, OutcomesPanel, WeekLedger } from "./LeftColumn";
+import { BoundariesPanel, OutcomesPanel, WeekLedger } from "./LeftColumn";
+import { AgendaList } from "./Agenda";
 import { ProactivePanel } from "./ProactivePanel";
-import { VerdictCard } from "./VerdictCard";
 import { AskComposer } from "./AskComposer";
 import { AgentNow } from "./AgentNow";
+import { LiveControls, ResetDemoButton } from "./Controls";
+import { DemoBadge, DemoSteps, InboxLine, RunDemoButton, StatTiles } from "./Overview";
+import { LogoMark } from "./LogoMark";
+import { EmailPlanButton, GoalOrder, Toast, type VerdictChange } from "./Actions";
 import { ChatDrawer } from "../chat/ChatDrawer";
-import { clockTime, plural } from "./format";
+import { clockTime, plural, savedHoursForSmaller } from "./format";
 
 const POLL_MS = 2500;
+
+const SECTIONS = ["plan", "goals", "activity"] as const;
+type Scope = "live" | "demo";
+type Section = (typeof SECTIONS)[number];
 
 function EmptyState({ inbox, desk }: { inbox: string | null; desk: DeskData | null }) {
   const notConfigured = desk && !desk.configured;
@@ -24,7 +32,7 @@ function EmptyState({ inbox, desk }: { inbox: string | null; desk: DeskData | nu
       className="rounded-2xl border border-dashed border-line-strong bg-surface/60 px-6 py-12 text-center"
     >
       <h2 id="empty-h" className="font-serif text-[28px] leading-tight text-ink">
-        Nothing asked of you yet.
+        No asks yet.
       </h2>
       {inbox ? (
         <p className="mt-4 inline-flex items-center gap-1.5 rounded-lg border border-line-strong bg-surface py-1 pl-3 pr-1.5">
@@ -34,7 +42,7 @@ function EmptyState({ inbox, desk }: { inbox: string | null; desk: DeskData | nu
       ) : (
         <p className="mt-4 font-mono text-[14px] text-muted">Set FEWER_INBOX to show the address</p>
       )}
-      <p className="mt-3 text-[14px] text-muted">Email it an ask. The verdict lands here.</p>
+      <p className="mt-3 text-[14px] text-muted">Import your week or add an ask.</p>
       {notConfigured ? (
         <p className="mx-auto mt-4 max-w-md rounded-lg bg-warn-bg px-3 py-2 text-[13px] text-warn-fg">
           The database isn’t connected yet (DATABASE_URL is not set), so the Desk is showing an empty state.
@@ -75,32 +83,6 @@ function SkeletonCard() {
   );
 }
 
-/** Left-to-right order of the "On the desk" counts (brief section 2, item 5). */
-const COUNT_ORDER: Verdict[] = ["NO", "SMALLER", "ASK_ONE", "YES", "WILDCARD", "BLOCKED"];
-
-/** Verdict counts over the asks currently on the desk. Counted from /api/desk asks, nothing invented. */
-function DeskCounts({ asks }: { asks: DeskData["asks"] }) {
-  const counts = COUNT_ORDER.map((verdict) => ({ verdict, n: asks.filter((a) => a.verdict === verdict).length })).filter(
-    (c) => c.n > 0,
-  );
-  if (counts.length === 0) return null;
-  return (
-    <div role="group" aria-label="On the desk" className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-muted tabular-nums">
-      <span className="font-medium">On the desk</span>
-      {counts.map(({ verdict, n }) => {
-        const v = VERDICTS[verdict];
-        return (
-          <span key={verdict} className="inline-flex items-center gap-1.5">
-            <span aria-hidden className={`size-2 rounded-full ${v.bar}`} />
-            <span className={`font-semibold ${v.text}`}>{v.label}</span>
-            <span>{n}</span>
-          </span>
-        );
-      })}
-    </div>
-  );
-}
-
 function CopyInbox({ inbox }: { inbox: string }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -131,8 +113,57 @@ export function Desk({ initialInbox, ownerName }: { initialInbox: string | null;
   const [skipNote, setSkipNote] = useState<string | null>(null);
   const [skippedLocal, setSkippedLocal] = useState(false);
   const [announce, setAnnounce] = useState("");
+  const [view, setView] = useState<Section>("plan");
+  // Live | Demo: everything on the page follows it except the shared goals. In the hash (#plan/demo) and localStorage.
+  const [scope, setScope] = useState<Scope>("live");
+  const [toast, setToast] = useState<string | null>(null);
+  const clearToast = useCallback(() => setToast(null), []);
+  const [changes, setChanges] = useState<Record<string, VerdictChange>>({});
+  useEffect(() => {
+    const read = () => {
+      const [h, sc] = window.location.hash.replace("#", "").split("/");
+      if (SECTIONS.includes(h as Section)) setView(h as Section);
+      let saved: string | null = null;
+      try {
+        saved = localStorage.getItem("fewer.scope");
+      } catch {
+        /* storage blocked */
+      }
+      const want = sc === "demo" || sc === "live" ? sc : h === "demo" ? "demo" : saved;
+      if (want === "demo" || want === "live") setScope(want);
+    };
+    const t = setTimeout(read, 0);
+    window.addEventListener("hashchange", read);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener("hashchange", read);
+    };
+  }, []);
 
   const firstLoad = useRef(true);
+  // Last payload minus its `now` stamp: an unchanged Desk causes no state update and no re-render.
+  const lastPayload = useRef("");
+  const [filter, setFilter] = useState<Verdict | null>(null);
+  // Before (every invite) | After (Fewer's plan). Defaults to After; remembered per browser.
+  const [plan, setPlanState] = useState<"before" | "after">("after");
+  const setPlan = useCallback((p: "before" | "after") => {
+    setPlanState(p);
+    try {
+      localStorage.setItem("fewer.plan", p);
+    } catch {
+      /* storage blocked: the choice just isn't remembered */
+    }
+  }, []);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      try {
+        if (localStorage.getItem("fewer.plan") === "before") setPlanState("before");
+      } catch {
+        /* ignore */
+      }
+    }, 0);
+    return () => clearTimeout(t);
+  }, []);
   // Ask ids present on the first load: those cards don't animate in. State, not a ref, because render reads it.
   const [initialIds, setInitialIds] = useState<Set<string> | null>(null);
   const announced = useRef<Map<string, string>>(new Map());
@@ -141,7 +172,14 @@ export function Desk({ initialInbox, ownerName }: { initialInbox: string | null;
     try {
       const res = await fetch("/api/desk", { cache: "no-store" });
       if (!res.ok) throw new Error(String(res.status));
-      const data = (await res.json()) as DeskData;
+      const text = await res.text();
+      const key = text.replace(/"now":"[^"]*",?/, "");
+      if (key === lastPayload.current) {
+        setOffline(false);
+        return;
+      }
+      lastPayload.current = key;
+      const data = JSON.parse(text) as DeskData;
       setDesk(data);
       setOffline(false);
 
@@ -166,6 +204,21 @@ export function Desk({ initialInbox, ownerName }: { initialInbox: string | null;
       setOffline(true);
     }
   }, []);
+
+  const onVerdictsChanged = useCallback(
+    (list: VerdictChange[]) => {
+      const byAsk = Object.fromEntries(list.map((c) => [c.askId, c]));
+      setChanges(byAsk);
+      // Flip the verdicts now; the next poll brings the rest (drafts, approvals).
+      setDesk((prev) =>
+        prev ? { ...prev, asks: prev.asks.map((a) => (byAsk[a.id] ? { ...a, verdict: byAsk[a.id].to } : a)) } : prev,
+      );
+      lastPayload.current = "";
+      void load();
+      setTimeout(() => setChanges({}), 8000);
+    },
+    [load],
+  );
 
   useEffect(() => {
     let stopped = false;
@@ -223,30 +276,129 @@ export function Desk({ initialInbox, ownerName }: { initialInbox: string | null;
   const showTimeSkipBadge = skippedLocal || (desk?.checkinsSent ?? 0) > 0;
   const isFirstPaint = desk === null;
 
-  return (
-    <div className="mx-auto w-full max-w-[1200px] flex-1 px-4 pb-10 pt-6 sm:px-6 sm:pt-8">
-      {/* ---------- header ---------- */}
-      <header className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4 border-b border-line pb-5">
-        <div>
-          <h1 className="font-serif text-[44px] leading-none tracking-tight text-ink sm:text-[52px]">Fewer</h1>
-          <p className="mt-1.5 text-[15px] text-muted">Fewer yeses, better ones.</p>
+  // LIVE and DEMO never mix: the stats and the Live tab show real asks only.
+  const liveAsks = asks.filter((a) => a.demo !== true);
+  const demoAsks = asks.filter((a) => a.demo === true);
+  const liveDesk = desk ? { ...desk, asks: liveAsks } : null;
+  // Demo hours saved: from the demo asks themselves, the same arithmetic the read-model uses for the week ledger.
+  const demoHours =
+    Math.round(
+      demoAsks.reduce(
+        (h, a) =>
+          h +
+          (a.verdict === "NO" && a.costHours != null
+            ? a.costHours
+            : a.verdict === "SMALLER" && a.costHours != null
+              ? savedHoursForSmaller(a.costHours, a.smallerOffer)
+              : 0),
+        0,
+      ) * 10,
+    ) / 10;
+  const demoDesk = desk
+    ? {
+        ...desk,
+        asks: demoAsks,
+        pending: desk.pendingDemo ?? null,
+        checkinsSent: 0,
+        ledger: { ...desk.ledger, hoursProtected: demoHours },
+      }
+    : null;
+  const verdictByDraft = Object.fromEntries(asks.flatMap((a) => (a.draft ? [[a.draft.id, a.verdict]] : [])));
+  const cardsFor = (list: typeof asks) => (
+    <AgendaList
+      asks={filter ? list.filter((a) => a.verdict === filter) : list}
+      timeZone={tz}
+      initialIds={initialIds}
+      changes={changes}
+      filter={filter}
+      onClearFilter={() => setFilter(null)}
+      mode={plan}
+    />
+  );
+  const planSwitch = (list: typeof asks) => {
+    const c = (v: Verdict[]) => list.filter((a) => a.verdict !== null && v.includes(a.verdict)).length;
+    const yes = c(["YES", "WILDCARD"]);
+    const shorter = c(["SMALLER"]);
+    const askOne = c(["ASK_ONE"]);
+    const declined = c(["NO", "BLOCKED"]);
+    return (
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div role="radiogroup" aria-label="Before or after Fewer" className="inline-flex rounded-xl border border-line bg-surface p-1">
+          {(
+            [
+              ["before", `Before: all ${list.length} invites`],
+              ["after", "After: your plan"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              role="radio"
+              aria-checked={plan === id}
+              onClick={() => setPlan(id)}
+              className={`h-8 rounded-lg px-3 text-[13px] transition-colors duration-200 ${
+                plan === id ? "bg-ink font-semibold text-action-ink" : "text-muted hover:text-ink"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
+        <p className="text-[13.5px] text-ink tabular-nums">
+          {list.length} invites → <span className="font-semibold">{yes} {yes === 1 ? "yes" : "yeses"}</span> · {shorter} shorter
+          {askOne ? ` · ${askOne} with one question` : ""} · {declined} declined
+        </p>
+      </div>
+    );
+  };
+  const NAV: { id: Section; label: string }[] = [
+    { id: "plan", label: "Plan" },
+    { id: "goals", label: "Goals" },
+    { id: "activity", label: "Activity" },
+  ];
+  const remember = (id: Section, sc: Scope) => {
+    try {
+      history.replaceState(null, "", `#${id}/${sc}`);
+      localStorage.setItem("fewer.scope", sc);
+    } catch {
+      /* hash and storage are conveniences only */
+    }
+  };
+  const go = (id: Section) => {
+    setView(id);
+    remember(id, scope);
+  };
+  const pickScope = (sc: Scope) => {
+    setScope(sc);
+    remember(view, sc);
+  };
+  const isDemoScope = scope === "demo";
+  const scopeDesk = isDemoScope ? demoDesk : liveDesk;
+  const scopeAsks = isDemoScope ? demoAsks : liveAsks;
+  const scopePending = isDemoScope ? (desk?.pendingDemo ?? null) : (desk?.pending ?? null);
 
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2 rounded-xl border border-line-strong bg-surface py-1.5 pl-3 pr-1.5">
-            <Inbox aria-hidden className="size-4 text-muted" />
-            <div className="leading-tight">
-              <p className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-muted">Email asks to</p>
-              <p className="font-mono text-[13.5px] text-ink select-all">{inbox ?? "set FEWER_INBOX"}</p>
-            </div>
-            {inbox ? <CopyInbox inbox={inbox} /> : null}
-          </div>
+  return (
+    <div className="mx-auto w-full max-w-[1200px] flex-1 px-4 pb-10 pt-3 sm:px-6">
+      {/* ---------- header: logo, what Fewer is doing, the two always-there actions ---------- */}
+      <header className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+          <h1 className="flex items-center gap-2.5 font-serif text-[36px] leading-none tracking-tight text-ink">
+            <LogoMark className="size-9" />
+            Fewer
+          </h1>
+          <AgentNow desk={scopeDesk} offline={offline} />
+          <p className="text-[13px] text-muted">
+            {offline ? (desk ? "Live updates paused." : "Reconnecting…") : isFirstPaint ? "Loading…" : `Live for ${owner}.`}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-start gap-2">
+          <EmailPlanButton scope={scope} onToast={setToast} />
           <button
             type="button"
             onClick={() => setChatOpen((o) => !o)}
             aria-expanded={chatOpen}
             aria-controls="ask-fewer-drawer"
-            className="inline-flex h-11 items-center gap-2 rounded-xl bg-action px-4 text-[14px] font-semibold text-action-ink transition hover:bg-black"
+            className="inline-flex h-11 items-center gap-2 rounded-xl bg-action px-4 text-[14px] font-semibold text-action-ink transition-transform duration-100 hover:bg-black active:scale-[0.97] motion-reduce:transition-none"
           >
             <MessageSquareText aria-hidden className="size-4" />
             Ask Fewer
@@ -254,112 +406,194 @@ export function Desk({ initialInbox, ownerName }: { initialInbox: string | null;
         </div>
       </header>
 
-      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
-        <AgentNow desk={desk} offline={offline} />
-        <p className="text-[12.5px] text-muted">
-          {offline
-            ? desk
-              ? "Live updates paused."
-              : "Reconnecting to the Desk…"
-            : isFirstPaint
-              ? "Loading the Desk…"
-              : `Live for ${owner}. Updates every few seconds.`}
-        </p>
-      </div>
+      {/* ---------- nav bar: one section at a time, in the URL hash ---------- */}
+      <nav aria-label="Sections" className="mt-3 flex flex-wrap items-end justify-between gap-x-4 gap-y-2 border-b border-line">
+        <div role="tablist" aria-label="Sections" className="-mb-px flex gap-1 overflow-x-auto">
+          {NAV.map(({ id, label }, i) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              id={`nav-${id}`}
+              aria-selected={view === id}
+              aria-controls={`section-${id}`}
+              tabIndex={view === id ? 0 : -1}
+              onClick={() => go(id)}
+              onKeyDown={(e) => {
+                const k = e.key;
+                if (k !== "ArrowRight" && k !== "ArrowLeft" && k !== "Home" && k !== "End") return;
+                e.preventDefault();
+                const n = k === "Home" ? 0 : k === "End" ? NAV.length - 1 : (i + (k === "ArrowRight" ? 1 : -1) + NAV.length) % NAV.length;
+                go(NAV[n].id);
+                document.getElementById(`nav-${NAV[n].id}`)?.focus();
+              }}
+              className={`inline-flex h-12 items-center gap-1.5 whitespace-nowrap border-b-[3px] px-4 text-[15px] transition-colors ${
+                view === id ? "border-ink font-semibold text-ink" : "border-transparent text-muted hover:text-ink"
+              }`}
+            >
+              {label}
+              {id === "plan" && scopePending ? (
+                <span className="ml-1 rounded-full bg-ink px-1.5 text-[11.5px] font-bold text-action-ink tabular-nums">
+                  {scopePending.drafts.length}
+                </span>
+              ) : null}
+            </button>
+          ))}
+        </div>
+        <div role="radiogroup" aria-label="Live or demo" className="mb-1.5 inline-flex rounded-xl border border-line-strong bg-surface p-1">
+          {(["live", "demo"] as const).map((sc) => (
+            <button
+              key={sc}
+              type="button"
+              role="radio"
+              aria-checked={scope === sc}
+              onClick={() => pickScope(sc)}
+              className={`inline-flex h-9 items-center gap-1.5 rounded-lg px-4 text-[14px] transition-colors ${
+                scope === sc ? "bg-ink font-semibold text-action-ink" : "text-muted hover:text-ink"
+              }`}
+            >
+              {sc === "demo" ? <FlaskConical aria-hidden className="size-4" /> : null}
+              {sc === "live" ? "Live" : "Demo"}
+            </button>
+          ))}
+        </div>
+      </nav>
+
+      {isDemoScope ? (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-ink/25 bg-surface px-4 py-2.5">
+          <DemoBadge />
+          <div className="flex flex-wrap items-start gap-2">
+            <ResetDemoButton onDone={load} onToast={setToast} />
+            <RunDemoButton onRan={load} />
+          </div>
+        </div>
+      ) : null}
 
       {offline && desk ? (
         <p role="status" className="mt-3 rounded-lg bg-warn-bg px-3.5 py-2 text-[13px] text-warn-fg">
           Reconnecting… showing {clockTime(desk.now, tz)}
         </p>
       ) : null}
-
       {desk?.error ? (
-        <p className="mt-4 flex items-start gap-2 rounded-lg bg-warn-bg px-3.5 py-2.5 text-[13.5px] text-warn-fg">
+        <p className="mt-3 flex items-start gap-2 rounded-lg bg-warn-bg px-3.5 py-2.5 text-[13.5px] text-warn-fg">
           <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
           {desk.error}
         </p>
       ) : null}
 
-      <ApprovalBanner
-        className="mt-5"
-        pending={desk?.pending ?? null}
-        approver={desk?.approver ?? null}
-        timeZone={tz}
-        onChanged={load}
-        verdictByDraft={Object.fromEntries(asks.flatMap((a) => (a.draft ? [[a.draft.id, a.verdict]] : [])))}
-      />
-
-      <div className="mt-6 grid gap-6 lg:grid-cols-[300px_minmax(0,1fr)]">
-        {/* ---------- left: this week ---------- */}
-        <aside aria-label="This week" className="order-2 space-y-4 lg:order-1 lg:sticky lg:top-6 lg:self-start">
-          <h2 className="font-serif text-[26px] leading-none text-ink">This week</h2>
-          <WeekLedger ledger={desk?.ledger ?? null} />
-          <JourneysPanel journeys={desk?.journeys ?? []} />
-          <BoundariesPanel boundaries={desk?.boundaries ?? []} />
-          <OutcomesPanel outcomes={desk?.outcomes ?? []} />
-          <ProactivePanel timeZone={tz} />
-        </aside>
-
-        {/* ---------- main: verdict cards ---------- */}
-        <main className="order-1 min-w-0 lg:order-2">
-          <AskComposer onAdded={load} />
-          <div className="mt-6" />
-          <div className="flex flex-wrap items-center justify-between gap-3">
+      {/* ---------- PLAN: goals, where we are, the one action, the agenda ---------- */}
+      <section role="tabpanel" id="section-plan" aria-labelledby="nav-plan" hidden={view !== "plan"} className="pt-3">
+        <GoalOrder journeys={desk?.journeys ?? []} onChanged={onVerdictsChanged} onToast={setToast} />
+        <div className="mt-3 rounded-[20px] border border-line bg-surface p-4">
+          <DemoSteps desk={scopeDesk} />
+          <div className="mt-3">
+            <StatTiles desk={scopeDesk} compact filter={filter} onFilter={setFilter} />
+          </div>
+        </div>
+        {!scopePending && Object.keys(changes).length > 0 ? (
+          <p role="status" className="mt-3 flex items-center gap-2 rounded-2xl border border-line bg-surface px-4 py-3 text-[14px] text-muted">
+            <Loader2 aria-hidden className="size-4 animate-spin motion-reduce:animate-none" />
+            Drafts updating…
+          </p>
+        ) : null}
+        <ApprovalBanner
+          key={scope}
+          className="mt-3"
+          pending={scopePending}
+          approver={desk?.approver ?? null}
+          timeZone={tz}
+          onChanged={load}
+          demo={isDemoScope}
+          verdictByDraft={verdictByDraft}
+        />
+        {isDemoScope ? null : <AskComposer className="mt-3" onAdded={load} />}
+        <main className="mt-5 min-w-0">
+          <div className="flex flex-wrap items-start justify-between gap-3">
             <h2 className="font-serif text-[26px] leading-none text-ink">
-              Asks <span className="font-sans text-[14px] text-muted tabular">{asks.length > 0 ? `· ${asks.length}` : ""}</span>
+              {isDemoScope ? "Demo events" : "Your events"}{" "}
+              <span className="font-sans text-[14px] text-muted tabular">{scopeAsks.length > 0 ? `· ${scopeAsks.length}` : ""}</span>
             </h2>
+            {isDemoScope ? null : <LiveControls onChanged={load} onToast={setToast} />}
+          </div>
+          {scopeAsks.length > 0 ? planSwitch(scopeAsks) : null}
+          <div aria-live="polite" aria-relevant="additions" className="mt-3">
+            {isFirstPaint ? (
+              [0, 1].map((i) => (
+                <div key={i} aria-hidden className="mb-3">
+                  <SkeletonCard />
+                </div>
+              ))
+            ) : scopeAsks.length === 0 ? (
+              isDemoScope ? (
+                <p className="rounded-2xl border border-dashed border-line-strong bg-surface/60 px-5 py-8 text-center text-[14px] text-muted">
+                  Nothing asked yet. Press Run demo to start.
+                </p>
+              ) : (
+                <EmptyState inbox={inbox} desk={desk} />
+              )
+            ) : (
+              cardsFor(scopeAsks)
+            )}
+          </div>
+        </main>
+      </section>
 
+      {/* ---------- GOALS: order and boundaries ---------- */}
+      <section role="tabpanel" id="section-goals" aria-labelledby="nav-goals" hidden={view !== "goals"} className="space-y-4 pt-4">
+        <div className="rounded-[20px] border border-line bg-surface p-4">
+          <GoalOrder journeys={desk?.journeys ?? []} onChanged={onVerdictsChanged} onToast={setToast} stacked />
+        </div>
+        <BoundariesPanel boundaries={desk?.boundaries ?? []} />
+        <InboxLine inbox={inbox} />
+      </section>
+
+      {/* ---------- ACTIVITY: what happened, follow-ups, proactive check ---------- */}
+      <section role="tabpanel" id="section-activity" aria-labelledby="nav-activity" hidden={view !== "activity"} className="pt-4">
+        <div className="grid gap-4 md:grid-cols-2">
+          <WeekLedger ledger={desk?.ledger ?? null} />
+          {(desk?.outcomes ?? []).length > 0 ? (
+            <OutcomesPanel outcomes={desk?.outcomes ?? []} />
+          ) : (
+            <p className="rounded-xl border border-line bg-surface p-4 text-[13.5px] text-muted">No ratings yet.</p>
+          )}
+          <ProactivePanel timeZone={tz} />
+          <div className="space-y-3 rounded-xl border border-line bg-surface p-4">
+            <p className="text-[13.5px] text-ink">Jump to tomorrow and ask how each yes went.</p>
             <div className="flex flex-wrap items-center gap-2">
-              {showTimeSkipBadge ? (
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-wildcard-accent/50 bg-wildcard-bg px-2.5 py-1 text-[11.5px] font-semibold text-wildcard-fg">
-                  <FlaskConical aria-hidden className="size-3.5" />
-                  time-skip (demo)
-                </span>
-              ) : null}
               <button
                 type="button"
                 onClick={timeSkip}
                 disabled={skipBusy}
-                title="Demo only: pretend it is tomorrow and send the check-ins now"
-                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-dashed border-line-strong bg-surface px-3 text-[13px] font-medium text-ink transition hover:border-ink disabled:opacity-60"
+                className="inline-flex h-11 items-center gap-1.5 rounded-xl bg-action px-4 text-[14px] font-semibold text-action-ink transition hover:bg-black disabled:opacity-60"
               >
-                Demo: skip to tomorrow
+                Skip to tomorrow (demo)
                 <ArrowRight aria-hidden className="size-4" />
               </button>
+              {showTimeSkipBadge ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-line-strong bg-paper px-2.5 py-1 text-[12px] font-semibold text-ink">
+                  <FlaskConical aria-hidden className="size-3.5" />
+                  time-skip (demo)
+                </span>
+              ) : null}
             </div>
+            {skipNote ? (
+              <p role="status" className="text-[13px] text-ink">
+                {skipNote}
+              </p>
+            ) : null}
           </div>
-          <DeskCounts asks={asks} />
-          {skipNote ? (
-            <p role="status" className="mt-2 text-[13px] text-muted">
-              {skipNote}
-            </p>
-          ) : null}
+        </div>
+      </section>
 
-          <div aria-live="polite" aria-relevant="additions" className="mt-4 space-y-4">
-            {isFirstPaint ? (
-              <div className="space-y-4" aria-hidden>
-                {[0, 1, 2].map((i) => (
-                  <SkeletonCard key={i} />
-                ))}
-              </div>
-            ) : asks.length === 0 ? (
-              <EmptyState inbox={inbox} desk={desk} />
-            ) : (
-              asks.map((card) => (
-                <VerdictCard key={card.id} card={card} timeZone={tz} isNew={initialIds !== null && !initialIds.has(card.id)} />
-              ))
-            )}
-          </div>
-          <p className="sr-only" role="status" aria-live="polite">
-            {announce}
-          </p>
-        </main>
-      </div>
+      <p className="sr-only" role="status" aria-live="polite">
+        {announce}
+      </p>
 
       <ChatDrawer open={chatOpen} onClose={() => setChatOpen(false)} />
+      <Toast text={toast} onDone={clearToast} />
 
       {/* ---------- footer ---------- */}
-      <footer className="mt-12 border-t border-line pt-5 text-[12.5px] leading-relaxed text-muted">
+      <footer className="mt-10 border-t border-line pt-5 text-[12.5px] leading-relaxed text-muted">
         <p>Models via Neon AI Gateway · research by Exa · mail by AgentMail · agent by Mastra · UI by assistant-ui</p>
         <p className="mt-1">Demo persona and demo inboxes. Nothing real is booked.</p>
       </footer>

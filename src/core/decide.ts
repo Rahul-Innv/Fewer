@@ -10,6 +10,7 @@ import {
   type ParsedAsk,
   type Rating,
   type RuleId,
+  type TakenBlock,
   type TimeBlockRule,
   type Verdict,
   type Weekday,
@@ -21,6 +22,9 @@ import { corroborate } from "./corroborate";
  * First matching rule wins, after the learned-dislike adjustment:
  *   R0 BLOCKED -> R2 ASK_ONE -> R1 conflict (NO | SMALLER) -> R3 YES
  *   -> R4 SMALLER -> R5 WILDCARD -> R6 NO
+ * R1 covers absolute boundaries and clashes with taken time (a calendar busy block or an
+ * already-accepted ask): a timed event that clashes is a NO; a meeting/request/other with
+ * some fit gets SMALLER ("offer another time"), with no fit a NO.
  * Web corroboration (>= 1 verified claim) gates R3 and R5 for public events only.
  * A private meeting or request has no public listing to check, so it never needs one.
  */
@@ -100,6 +104,50 @@ export function overlapsTimeBlock(
     }
   }
   return false;
+}
+
+/** Does [startMs, endMs) overlap [blockStartMs, blockEndMs)? Touching edges do not overlap. */
+export function overlapsInterval(startMs: number, endMs: number, blockStartMs: number, blockEndMs: number): boolean {
+  return startMs < blockEndMs && blockStartMs < endMs;
+}
+
+/**
+ * Taken blocks the ask's [startsAt, startsAt + durationMin) overlaps. Works on absolute instants,
+ * so the ask and the blocks may carry different offsets. Empty without a start or duration.
+ */
+export function findClashes(ask: Pick<ParsedAsk, "startsAt" | "durationMin">, blocks: readonly TakenBlock[] | undefined): TakenBlock[] {
+  if (!ask.startsAt || ask.durationMin == null || !blocks?.length) return [];
+  const start = Date.parse(ask.startsAt);
+  if (Number.isNaN(start)) return [];
+  const end = start + ask.durationMin * 60_000;
+  return blocks.filter((b) => {
+    const bs = Date.parse(b.start);
+    const be = Date.parse(b.end);
+    return !Number.isNaN(bs) && !Number.isNaN(be) && be > bs && overlapsInterval(start, end, bs, be);
+  });
+}
+
+/** "6:30 PM Tue" in the owner's zone; the raw ISO string if it does not parse. */
+export function formatClashTime(iso: string, timeZone: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const time = new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", minute: "2-digit", hour12: true }).format(date);
+  const weekday = new Intl.DateTimeFormat("en-US", { timeZone, weekday: "short" }).format(date);
+  return `${time} ${weekday}`;
+}
+
+/** One reason per clash, accepted asks first, without repeats. */
+function clashReasons(clashes: TakenBlock[], timeZone: string): string[] {
+  const out: string[] = [];
+  const sorted = [...clashes].sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "accepted" ? -1 : 1));
+  for (const c of sorted) {
+    const line =
+      c.kind === "accepted"
+        ? `Clashes with ${c.label || "something you already said yes to"} at ${formatClashTime(c.start, timeZone)}`
+        : "Your calendar is busy then";
+    if (!out.includes(line)) out.push(line);
+  }
+  return out;
 }
 
 type ConflictKind = "time_block" | "max_minutes" | "evenings";
@@ -291,15 +339,24 @@ export function decide(
   const hard = conflicts.filter((c) => c.boundary.strength === "absolute");
   const softNotes = conflicts.filter((c) => c.boundary.strength !== "absolute").map(conflictReason);
 
-  // R1: absolute boundary conflict.
+  // R1: absolute boundary conflict, or a clash with time already taken (calendar or an accepted ask).
+  const clashLines = clashReasons(findClashes(ask, ctx.takenBlocks), tz);
   if (hard.length > 0) {
-    const hardReasons = hard.map(conflictReason);
+    const hardReasons = [...hard.map(conflictReason), ...clashLines];
     if (maxFit >= 1 && best && (ask.kind === "meeting" || ask.kind === "request")) {
       return make("SMALLER", "R1", [...hardReasons, `Still worth something: ${fitLine(best)}`, ...dislikeNote], {
         smallerOffer: smallerOfferForConflict(ask, hard),
       });
     }
     return make("NO", "R1", [...hardReasons, ...dislikeNote]);
+  }
+  if (clashLines.length > 0) {
+    if (ask.kind !== "event" && maxFit >= 1 && best) {
+      return make("SMALLER", "R1", [...clashLines, `Still worth something: ${fitLine(best)}`, ...softNotes, ...dislikeNote], {
+        smallerOffer: "Offer another time that week",
+      });
+    }
+    return make("NO", "R1", [...clashLines, ...softNotes, ...dislikeNote]);
   }
 
   // Evening capacity for non-absolute evening caps (absolute ones were handled by R1).

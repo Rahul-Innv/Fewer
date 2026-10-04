@@ -14,7 +14,7 @@ export const SURFACES = {
   lineStrong: "#cbc4b4",
   focus: "#2b59c3",
   action: "#1b1f23",
-  actionInk: "#ffffff",
+  actionInk: "#f6f4ef",
   warnBg: "#fff4d6",
   warnFg: "#6b4300",
 } as const;
@@ -39,7 +39,7 @@ export type VerdictToken = {
 
 export const VERDICTS: Record<Verdict, VerdictToken> = {
   YES: {
-    label: "YES",
+    label: "Yes",
     meaning: "Worth your time",
     bg: "#dcf2e3",
     fg: "#0b5a29",
@@ -52,7 +52,7 @@ export const VERDICTS: Record<Verdict, VerdictToken> = {
     word: "Yes.",
   },
   WILDCARD: {
-    label: "WILDCARD",
+    label: "Wildcard",
     meaning: "This week's one exploratory yes",
     bg: "#ebe3fb",
     fg: "#4a2a99",
@@ -65,7 +65,7 @@ export const VERDICTS: Record<Verdict, VerdictToken> = {
     word: "Wildcard.",
   },
   SMALLER: {
-    label: "SMALLER",
+    label: "Shorter",
     meaning: "Yes to a smaller version",
     bg: "#fbe9c6",
     fg: "#774700",
@@ -75,10 +75,10 @@ export const VERDICTS: Record<Verdict, VerdictToken> = {
     bar: "bg-smaller-accent",
     edge: "border-l-smaller-accent",
     text: "text-smaller-fg",
-    word: "Smaller.",
+    word: "Shorter.",
   },
   ASK_ONE: {
-    label: "ASK ONE",
+    label: "One question",
     meaning: "One question before deciding",
     bg: "#dbe9fb",
     fg: "#0e3d8a",
@@ -88,10 +88,10 @@ export const VERDICTS: Record<Verdict, VerdictToken> = {
     bar: "bg-askone-accent",
     edge: "border-l-askone-accent",
     text: "text-askone-fg",
-    word: "Ask one.",
+    word: "One question.",
   },
   NO: {
-    label: "NO",
+    label: "No",
     meaning: "A kind no",
     bg: "#e6e9ed",
     fg: "#323c49",
@@ -104,7 +104,7 @@ export const VERDICTS: Record<Verdict, VerdictToken> = {
     word: "No.",
   },
   BLOCKED: {
-    label: "BLOCKED",
+    label: "Blocked",
     meaning: "Quarantined, nothing sent",
     bg: "#fadcdc",
     fg: "#861414",

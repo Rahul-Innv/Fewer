@@ -48,7 +48,7 @@ export function AgentStatus({
             "size-1.5 shrink-0 rounded-full motion-reduce:animate-none",
             state === "working"
               ? "live-dot bg-focus"
-              : "border-askone-accent border-[1.5px] size-2",
+              : "border-ink border-[1.5px] size-2",
           )}
         />
       )}

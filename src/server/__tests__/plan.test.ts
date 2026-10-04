@@ -312,12 +312,13 @@ describe("emailPlan", () => {
       messageId: "msg-1",
     });
     expect(h.sendMail).toHaveBeenCalledTimes(1);
-    const arg = h.sendMail.mock.calls[0]![0] as { inboxId: string; to: string[]; subject: string; text: string; idempotencyKey: string };
+    const arg = h.sendMail.mock.calls[0]![0] as { inboxId: string; to: string[]; subject: string; text: string; html: string; idempotencyKey: string };
     expect(arg.to).toEqual(["owner@example.org"]);
     expect(arg.inboxId).toBe("fewer@agentmail.test");
     expect(arg.subject).toBe("Your Tech Week plan from Fewer: 2 events");
     expect(arg.text).toContain("Needs one answer");
-    expect(arg.idempotencyKey).toBe(planIdempotencyKey(arg.subject, arg.text));
+    expect(arg.html).toContain("NEEDS AN ANSWER");
+    expect(arg.idempotencyKey).toBe(planIdempotencyKey(arg.subject, arg.text, arg.html));
     expect(h.logEvent).toHaveBeenCalledWith("plan_emailed", null, { scope: "demo", going: 2, smaller: 1, askOne: 1, messageId: "msg-1" });
   });
 

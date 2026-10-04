@@ -99,7 +99,7 @@ function StageDot({
         aria-hidden
         className={cn(
           "size-4 shrink-0 rounded-full border-2 bg-surface",
-          tone === "waiting" ? "live-dot border-askone-accent" : "live-dot border-focus",
+          tone === "waiting" ? "live-dot border-ink" : "live-dot border-focus",
         )}
       />
     );

@@ -133,4 +133,6 @@ export type DeskData = {
   outcomes: OutcomeRowView[];
   /** Count of check-ins sent so far (the demo time-skip or real ones). */
   checkinsSent: number;
+  /** Calendar busy blocks (times only, never titles) from Monday of this week through the next 7 days. */
+  commitments?: { start: string; end: string; source: string }[];
 };

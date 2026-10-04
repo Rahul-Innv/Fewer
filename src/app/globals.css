@@ -16,7 +16,7 @@
   --color-line-strong: #cbc4b4;
   --color-focus: #2b59c3;
   --color-action: #1b1f23;
-  --color-action-ink: #ffffff;
+  --color-action-ink: #f6f4ef;
 
   --color-yes-bg: #dcf2e3;
   --color-yes-fg: #0b5a29;
@@ -188,6 +188,21 @@ body {
 
 .verdict-why {
   animation: fade-in 150ms ease-out calc(var(--land-lead, 0ms) + 280ms) both;
+}
+
+/* Agenda timeline: a thin vertical line behind the verdict dots. */
+.timeline {
+  position: relative;
+}
+
+.timeline::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  bottom: 8px;
+  width: 1px;
+  background: var(--color-line-strong);
 }
 
 /* Agent status label change and the approval receipt: a short fade, once. */

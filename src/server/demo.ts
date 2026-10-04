@@ -58,16 +58,37 @@ export async function lastDemoRunAt(): Promise<string | null> {
 }
 
 export type DemoStart =
-  | { ok: true; startedAt: string; askIds: string[] }
+  | { ok: true; startedAt: string; total: number }
   | { ok: false; status: 409 | 412; error: string; lastRunAt?: string | null };
 
 let starting = false;
+const STAGGER_MS = 3_000;
 
-/** Resets the demo data and records the four asks. Refuses inside the cooldown or against a non-demo DB. */
+function guardDemoDb(): { ok: false; status: 412; error: string } | null {
+  return /euzena/i.test(directDatabaseUrl() ?? "")
+    ? { ok: false, status: 412, error: "Refusing to reset: this looks like the Euzena database." }
+    : null;
+}
+
+function demoAsks() {
+  const owner = process.env.FEWER_OWNER_NAME?.trim() || "Rahul";
+  const tz = process.env.FEWER_TZ?.trim() || "America/Los_Angeles";
+  const eventUrl = process.env.FEWER_DEMO_EVENT_URL?.trim() || DEMO_EVENT.url;
+  return buildAsks({ owner, tz, eventUrl }).main;
+}
+
+/** Clears demo rows only (no re-seed). Live data is untouched. */
+export async function resetDemo(): Promise<{ ok: true } | { ok: false; status: 412; error: string }> {
+  const refused = guardDemoDb();
+  if (refused) return refused;
+  await deleteDemoRows();
+  return { ok: true };
+}
+
+/** Starts a run: clears demo rows and stamps the run. The asks arrive later, staggered (runDemoStaggered). */
 export async function startDemoRun(now = new Date()): Promise<DemoStart> {
-  if (/euzena/i.test(directDatabaseUrl() ?? "")) {
-    return { ok: false, status: 412, error: "Refusing to reset: this looks like the Euzena database." };
-  }
+  const refused = guardDemoDb();
+  if (refused) return refused;
   if (starting) return { ok: false, status: 409, error: "A demo run is already starting." };
   starting = true;
   try {
@@ -77,27 +98,36 @@ export async function startDemoRun(now = new Date()): Promise<DemoStart> {
     }
     await deleteDemoRows();
     const startedAt = now.toISOString();
-    await logEvent("demo_run", null, { startedAt });
-
-    const { submitDemoAsk } = await import("./pipeline");
-    const owner = process.env.FEWER_OWNER_NAME?.trim() || "Rahul";
-    const tz = process.env.FEWER_TZ?.trim() || "America/Los_Angeles";
-    const eventUrl = process.env.FEWER_DEMO_EVENT_URL?.trim() || DEMO_EVENT.url;
-    const { main } = buildAsks({ owner, tz, eventUrl });
-    const askIds: string[] = [];
-    for (const [i, ask] of main.entries()) {
-      const sender = SENDERS[i] ?? SENDERS[0]!;
-      askIds.push(await submitDemoAsk({ subject: ask.subject, text: ask.text, ...sender }));
-    }
-    return { ok: true, startedAt, askIds };
+    const total = demoAsks().length;
+    await logEvent("demo_run", null, { startedAt, total });
+    return { ok: true, startedAt, total };
   } finally {
     starting = false;
   }
 }
 
-/** Triage the demo asks (real model + Exa + rules), then create their approval with no email. */
-export async function runDemoTriage(askIds: string[]): Promise<void> {
-  const { triage, sendBrief } = await import("./pipeline");
-  await Promise.all(askIds.map((id) => triage(id)));
+/**
+ * The asks arrive one every STAGGER_MS and each is triaged as it lands (real model + Exa + rules),
+ * so the Desk shows them arriving and being decided. Then one Desk-only approval, no email.
+ */
+export async function runDemoStaggered(): Promise<void> {
+  const { submitDemoAsk, triage, sendBrief } = await import("./pipeline");
+  const asks = demoAsks();
+  const askIds: string[] = [];
+  const triages: Promise<void>[] = [];
+  for (const [i, ask] of asks.entries()) {
+    if (i > 0) await new Promise((r) => setTimeout(r, STAGGER_MS));
+    const sender = SENDERS[i] ?? SENDERS[0]!;
+    const id = await submitDemoAsk({ subject: ask.subject, text: ask.text, ...sender });
+    askIds.push(id);
+    triages.push(triage(id).catch((e) => console.error("[fewer/demo] triage failed", id, e)));
+  }
+  await Promise.all(triages);
   await sendBrief(askIds);
+}
+
+/** For "2 of 5 asks arrived": demo asks present now vs the planned total. */
+export async function demoProgress(): Promise<{ inserted: number; total: number }> {
+  const [r] = await sql<{ n: number }[]>`select count(*)::int as n from asks where inbox_message_id like 'demo-%'`;
+  return { inserted: r?.n ?? 0, total: demoAsks().length };
 }
