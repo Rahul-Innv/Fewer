@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { X, ArrowUp, Square, Sparkles, TriangleAlert } from "lucide-react";
+import { X, ArrowUp, MessageSquareText, Square, Sparkles, TriangleAlert } from "lucide-react";
 import {
   AssistantRuntimeProvider,
   AuiIf,
@@ -13,11 +13,7 @@ import {
 import { AssistantChatTransport, useChatRuntime } from "@assistant-ui/react-ai-sdk";
 import { AgentStatus } from "@/components/assistant-ui/elements/agent-status";
 
-const SUGGESTIONS = [
-  "Why did you say no to the panel?",
-  "What did you protect this week?",
-  "Which asks are waiting on me?",
-];
+const SUGGESTIONS = ["Why did you say no to the panel?", "What does my week look like?", "Which yes matters most?"];
 
 function UserMessage() {
   return (
@@ -120,32 +116,64 @@ function ChatRuntime() {
   );
 }
 
-/** Right-side "Ask Fewer" drawer: assistant-ui Thread wired to POST /api/chat (Mastra agent). */
+/** "Ask Fewer" floating chat panel (assistant-ui Assistant modal pattern): Thread wired to POST /api/chat (Mastra agent). */
 export function ChatDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [everOpened, setEverOpened] = useState(open);
   const panelRef = useRef<HTMLElement>(null);
   // Mount the chat runtime on first open and keep it mounted (state derived during render).
   if (open && !everOpened) setEverOpened(true);
 
+  const closeRef = useRef(onClose);
+  useEffect(() => {
+    closeRef.current = onClose;
+  }, [onClose]);
+
   useEffect(() => {
     if (!open) return;
+    const opener = document.activeElement;
+    const t = setTimeout(() => {
+      const input = panelRef.current?.querySelector<HTMLElement>("textarea, button");
+      (input ?? panelRef.current)?.focus();
+    }, 50);
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") closeRef.current();
+      // Keep focus inside the open panel.
+      if (e.key === "Tab" && panelRef.current) {
+        const items = [...panelRef.current.querySelectorAll<HTMLElement>("button:not([disabled]), textarea, [href], [tabindex]:not([tabindex='-1'])")];
+        if (items.length === 0) return;
+        const first = items[0];
+        const last = items[items.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener("keydown", onKey);
+      if (opener instanceof HTMLElement) opener.focus();
+    };
+  }, [open]);
 
   return (
     <aside
       ref={panelRef}
       id="ask-fewer-drawer"
-      role="complementary"
+      role="dialog"
+      aria-modal={open}
       aria-label="Ask Fewer chat"
       aria-hidden={!open}
       inert={!open}
-      className={`fixed inset-y-0 right-0 z-40 flex w-full max-w-[420px] flex-col border-l border-line-strong bg-paper transition-transform duration-200 ${
-        open ? "translate-x-0 shadow-[-24px_0_60px_-30px_rgba(27,31,35,0.35)]" : "translate-x-full"
+      tabIndex={-1}
+      className={`fixed inset-0 z-50 flex flex-col overflow-hidden bg-paper outline-none transition-[opacity,transform] duration-200 motion-reduce:transition-none sm:inset-auto sm:bottom-[calc(96px+env(safe-area-inset-bottom))] sm:right-[calc(24px+env(safe-area-inset-right))] sm:h-[min(560px,calc(100vh-128px))] sm:w-[400px] sm:rounded-[20px] sm:border sm:border-line-strong ${
+        open
+          ? "translate-y-0 opacity-100 shadow-[0_24px_60px_-24px_rgba(27,31,35,0.5)]"
+          : "pointer-events-none translate-y-3 opacity-0"
       }`}
     >
       <div className="flex items-center justify-between border-b border-line px-4 py-3">
@@ -157,12 +185,33 @@ export function ChatDrawer({ open, onClose }: { open: boolean; onClose: () => vo
           type="button"
           onClick={onClose}
           aria-label="Close chat"
-          className="grid size-8 place-items-center rounded-lg text-muted transition hover:bg-line hover:text-ink"
+          className="grid size-11 place-items-center rounded-xl text-muted transition hover:bg-line hover:text-ink"
         >
-          <X aria-hidden className="size-4" />
+          <X aria-hidden className="size-5" />
         </button>
       </div>
       <div className="min-h-0 flex-1">{everOpened ? <ChatRuntime /> : null}</div>
     </aside>
+  );
+}
+
+/** Bottom-right launcher for the chat: an ink circle, with an "Ask Fewer" pill beside it on wider screens. */
+export function ChatLauncher({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-label={open ? "Close Ask Fewer" : "Ask Fewer"}
+      aria-expanded={open}
+      aria-controls="ask-fewer-drawer"
+      className="fixed bottom-[calc(24px+env(safe-area-inset-bottom))] right-[calc(24px+env(safe-area-inset-right))] z-50 inline-flex items-center gap-2 rounded-full transition-transform duration-100 active:scale-[0.96] motion-reduce:transition-none"
+    >
+      <span className="hidden rounded-full border border-line-strong bg-surface px-3.5 py-2 text-[14px] font-semibold text-ink shadow-[0_8px_24px_-12px_rgba(27,31,35,0.45)] sm:inline">
+        Ask Fewer
+      </span>
+      <span className="grid size-14 place-items-center rounded-full bg-action text-action-ink shadow-[0_12px_32px_-12px_rgba(27,31,35,0.7)] hover:bg-black">
+        {open ? <X aria-hidden className="size-6" /> : <MessageSquareText aria-hidden className="size-6" />}
+      </span>
+    </button>
   );
 }
