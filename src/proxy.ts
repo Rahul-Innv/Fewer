@@ -31,8 +31,14 @@ export async function proxy(request: NextRequest) {
     );
   }
 
-  // Relative Location: correct behind Fly's TLS-terminating proxy, where the internal URL is plain http.
-  return new NextResponse(null, { status: 307, headers: { Location: "/login", "Cache-Control": "no-store" } });
+  // Needs an absolute URL here (a bare "/login" Location throws "Invalid URL" in production). Next
+  // puts it on the wire as `Location: /login`, so scheme and host stay right behind Fly's proxy.
+  const login = request.nextUrl.clone();
+  login.pathname = "/login";
+  login.search = "";
+  const res = NextResponse.redirect(login, 307);
+  res.headers.set("Cache-Control", "no-store");
+  return res;
 }
 
 export const config = {

@@ -211,10 +211,16 @@ export async function handleInbound(inboxId: string, messageId: string): Promise
     // Threading can break (a fresh email instead of a reply): an approver-sent "YES <CODE>" that matches a
     // live pending code is still an approval reply, never an ask. Still gated by sender + single-use code.
     const line = firstReplyLine(msg.replyText);
-    const m = line ? /^YESs+([A-Z0-9]{4})s*[.!]?$/i.exec(line) : null;
+    const m = line ? /^YES\s+([A-Z0-9]{4})\s*[.!]?$/i.exec(line) : null;
     const byCode = m ? await db.findPendingApprovalByCode(m[1]!.toUpperCase()) : null;
     if (byCode) {
       await handleApprovalReply(msg, byCode);
+      return;
+    }
+    // A reply on any thread Fewer started (morning brief, receipts) is conversation, not a new ask.
+    if (msg.threadId && (await db.isFewerThread(msg.threadId))) {
+      log(`approver reply on a Fewer thread ${msg.threadId}; not an ask`);
+      await db.logEvent("approver_note", null, { threadId: msg.threadId });
       return;
     }
   }
@@ -981,10 +987,14 @@ export function buildMorningBrief(
   return { subject, text: lines.join("\n"), summary, facts };
 }
 
-type MorningBriefResult = { sent: boolean; summary: string; error?: string };
+type MorningBriefResult = { sent: boolean; summary: string; error?: string; alreadySentToday?: boolean };
 
-/** Builds the brief from the database and emails it to the approver. Never throws on a send failure. */
-async function morningBriefInner(now: Date): Promise<MorningBriefResult> {
+/**
+ * Builds the brief from the database and emails it to the approver. Never throws on a send failure.
+ * `demo` (the Desk button) always sends a fresh email under its own Idempotency-Key and logs the event as
+ * demo, so a rehearsal click can neither burn the real brief nor suppress the 08:00 one.
+ */
+async function morningBriefInner(now: Date, demo: boolean): Promise<MorningBriefResult> {
   const c = cfg();
   const [awaiting, boundaries, commitments, weekDecisions] = await Promise.all([
     db.awaitingApprovalAsks().catch(() => null),
@@ -1010,21 +1020,26 @@ async function morningBriefInner(now: Date): Promise<MorningBriefResult> {
     c.tz,
   );
   const date = brief.facts.date || now.toISOString().slice(0, 10);
+  if (!demo && (await db.morningBriefLogged(date).catch(() => false))) {
+    return { sent: false, summary: brief.summary, alreadySentToday: true };
+  }
+  const subject = demo ? `${brief.subject} (demo run)` : brief.subject;
   try {
     const sent = await mail.sendMail({
       inboxId: c.inbox,
       to: [c.approver],
-      subject: brief.subject,
+      subject,
       text: brief.text,
-      idempotencyKey: `morning.${date}`,
+      idempotencyKey: demo ? `morning.${date}.demo.${Math.floor(now.getTime() / 60_000)}` : `morning.${date}`,
     });
     await db.logEvent("morning_brief", null, {
       date,
       summary: brief.summary,
-      subject: brief.subject,
+      subject,
       facts: brief.facts,
       messageId: sent.messageId,
       threadId: sent.threadId,
+      ...(demo ? { demo: true } : {}),
     });
     log(`morning brief sent for ${date}: ${brief.summary}`);
     return { sent: true, summary: brief.summary };
@@ -1035,11 +1050,12 @@ async function morningBriefInner(now: Date): Promise<MorningBriefResult> {
 }
 
 /**
- * Email the morning brief now (the Desk's demo button and the worker both end up here). The Idempotency-Key
- * is per local date, so a second call the same day cannot put a second email in the inbox.
+ * Email the morning brief now. The Idempotency-Key is per local date (morning.<YYYY-MM-DD>), so a second call
+ * the same day cannot put a second email in the inbox: it reports alreadySentToday instead. The Desk's labeled
+ * demo button passes `{ demo: true }` to send a fresh, clearly marked one.
  */
-export function runMorningBrief(now: Date = new Date()): Promise<MorningBriefResult> {
-  return enqueue("morning", () => morningBriefInner(now));
+export function runMorningBrief(now: Date = new Date(), opts: { demo?: boolean } = {}): Promise<MorningBriefResult> {
+  return enqueue("morning", () => morningBriefInner(now, opts.demo === true));
 }
 
 /** Worker tick: run the morning brief only inside the 08:00-08:05 local window and once per local date. */
@@ -1049,6 +1065,6 @@ export function runMorningBriefIfDue(now: Date = new Date()): Promise<MorningBri
     if (!isMorningBriefWindow(now, c.tz)) return null;
     const date = localDateKey(now, c.tz);
     if (!date || (await db.morningBriefLogged(date))) return null;
-    return morningBriefInner(now);
+    return morningBriefInner(now, false);
   });
 }

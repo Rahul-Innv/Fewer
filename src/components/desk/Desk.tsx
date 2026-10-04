@@ -7,6 +7,7 @@ import type { DeskData } from "./types";
 import { VERDICTS } from "./tokens";
 import { ApprovalBanner } from "./ApprovalBanner";
 import { BoundariesPanel, JourneysPanel, OutcomesPanel, WeekLedger } from "./LeftColumn";
+import { ProactivePanel } from "./ProactivePanel";
 import { VerdictCard } from "./VerdictCard";
 import { AskComposer } from "./AskComposer";
 import { ChatDrawer } from "../chat/ChatDrawer";
@@ -289,6 +290,7 @@ export function Desk({ initialInbox, ownerName }: { initialInbox: string | null;
           <JourneysPanel journeys={desk?.journeys ?? []} />
           <BoundariesPanel boundaries={desk?.boundaries ?? []} />
           <OutcomesPanel outcomes={desk?.outcomes ?? []} />
+          <ProactivePanel timeZone={tz} />
         </aside>
 
         {/* ---------- main: verdict cards ---------- */}

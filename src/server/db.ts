@@ -133,6 +133,13 @@ export interface DecisionRow {
 // ---------- events ----------
 
 /** Never throws: logging must not break the pipeline. */
+/** True when Fewer started this email thread (a brief, a morning brief, a check-in). */
+export async function isFewerThread(threadId: string): Promise<boolean> {
+  const rows = await sql<{ n: number }[]>`
+    select count(*)::int as n from events_log where detail->>'threadId' = ${threadId}`;
+  return (rows[0]?.n ?? 0) > 0;
+}
+
 export async function logEvent(kind: string, askId: string | null, detail: Record<string, unknown> = {}): Promise<void> {
   try {
     await sql`insert into events_log (kind, ask_id, detail) values (${kind}, ${askId}, ${j(detail)})`;
@@ -513,10 +520,12 @@ export async function weekDecisionRows(
     });
 }
 
-/** Has a morning brief already been sent for this local date (YYYY-MM-DD)? */
+/** Has the real (non-demo) morning brief already been sent for this local date (YYYY-MM-DD)? */
 export async function morningBriefLogged(date: string): Promise<boolean> {
   const rows = await sql`
-    select 1 from events_log where kind = 'morning_brief' and detail->>'date' = ${date}::text limit 1`;
+    select 1 from events_log
+    where kind = 'morning_brief' and detail->>'date' = ${date}::text and coalesce(detail->>'demo', 'false') <> 'true'
+    limit 1`;
   return rows.length > 0;
 }
 

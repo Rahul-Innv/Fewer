@@ -84,9 +84,27 @@ async function main() {
       .catch(() => undefined);
   }, 60_000);
 
+  // Proactive mode: plain intervals (not Mastra schedules). Both guard the owner's time and read only
+  // facts already in the database; the pipeline serialises each job, so a slow tick cannot overlap itself.
+  const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+  const dueCheckins = setInterval(() => {
+    pipeline
+      .runDueCheckins()
+      .then((n) => n > 0 && log(`sent ${n} due check-in(s)`))
+      .catch((e) => log(`due check-ins failed: ${errText(e)}`));
+  }, 60_000);
+  const morningBrief = setInterval(() => {
+    pipeline
+      .runMorningBriefIfDue()
+      .then((r) => r && log(r.sent ? `morning brief sent: ${r.summary}` : `morning brief not sent: ${r.error ?? "unknown error"}`))
+      .catch((e) => log(`morning brief failed: ${errText(e)}`));
+  }, 60_000);
+
   const shutdown = async () => {
     log("shutting down");
     clearInterval(sweep);
+    clearInterval(dueCheckins);
+    clearInterval(morningBrief);
     if (timer) clearTimeout(timer);
     listener.stop();
     await db.closeDb().catch(() => undefined);
