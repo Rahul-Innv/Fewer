@@ -1,0 +1,213 @@
+@import "tailwindcss";
+
+/*
+ * Fewer design tokens. Role-named, never hue-named.
+ * The same hex values live in src/components/desk/tokens.ts; the vitest file
+ * src/components/desk/tokens.test.ts recomputes WCAG contrast for every pair and
+ * fails on drift between the two. Change the hex, never the threshold.
+ */
+@theme {
+  --color-paper: #f6f4ef;
+  --color-surface: #ffffff;
+  --color-ink: #1b1f23;
+  --color-muted: #566070;
+  --color-line: #e4dfd5;
+  --color-line-strong: #cbc4b4;
+  --color-focus: #2b59c3;
+  --color-action: #1b1f23;
+  --color-action-ink: #ffffff;
+
+  --color-yes-bg: #dcf2e3;
+  --color-yes-fg: #0b5a29;
+  --color-yes-accent: #15803d;
+  --color-wildcard-bg: #ebe3fb;
+  --color-wildcard-fg: #4a2a99;
+  --color-wildcard-accent: #6d28d9;
+  --color-smaller-bg: #fbe9c6;
+  --color-smaller-fg: #774700;
+  --color-smaller-accent: #b45309;
+  --color-askone-bg: #dbe9fb;
+  --color-askone-fg: #0e3d8a;
+  --color-askone-accent: #1d4ed8;
+  --color-no-bg: #e6e9ed;
+  --color-no-fg: #323c49;
+  --color-no-accent: #475569;
+  --color-blocked-bg: #fadcdc;
+  --color-blocked-fg: #861414;
+  --color-blocked-accent: #b91c1c;
+
+  --color-warn-bg: #fff4d6;
+  --color-warn-fg: #6b4300;
+}
+
+@theme inline {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-serif: var(--font-serif-display), Georgia, "Times New Roman", serif;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  background: var(--color-paper);
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+::selection {
+  background: #cfdcf7;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes drawer-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* The verdict lands (brief section 3): edge draws, word stamps, why line fades in. Once per card. */
+@keyframes edge-draw {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes verdict-stamp {
+  0% {
+    opacity: 0;
+    transform: scale(1.35) rotate(-3deg);
+    animation-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  72% {
+    opacity: 1;
+    transform: scale(1) rotate(0deg) translateY(2px);
+    animation-timing-function: ease-out;
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) rotate(0deg) translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgb(43 89 195 / 0.35);
+  }
+  100% {
+    box-shadow: 0 0 0 10px rgb(43 89 195 / 0);
+  }
+}
+
+.card-in {
+  animation: card-in 380ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+.drawer-in {
+  animation: drawer-in 220ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+.live-dot {
+  animation: pulse-ring 1.8s ease-out infinite;
+}
+
+/* --land-lead is 380ms when the card itself is arriving (wait for card-in), 0ms when a verdict lands on a card already shown. */
+.verdict-edge {
+  transform-origin: top;
+  animation: edge-draw 200ms cubic-bezier(0.2, 0.8, 0.2, 1) var(--land-lead, 0ms) both;
+}
+
+.verdict-word {
+  display: inline-block;
+  transform-origin: 0% 70%;
+  animation: verdict-stamp 260ms cubic-bezier(0.34, 1.56, 0.64, 1) calc(var(--land-lead, 0ms) + 120ms) both;
+}
+
+.verdict-why {
+  animation: fade-in 150ms ease-out calc(var(--land-lead, 0ms) + 280ms) both;
+}
+
+/* Skeleton bars: bg-line with a light sweep, 1.4s linear. No spinner. */
+.skeleton-bar {
+  position: relative;
+  overflow: hidden;
+}
+
+.skeleton-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.6), transparent);
+  animation: shimmer 1.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-in,
+  .drawer-in,
+  .live-dot,
+  .verdict-edge,
+  .skeleton-bar::after {
+    animation: none;
+  }
+  /* Verdict landing under reduced motion: a 150ms opacity fade only, no scale, rotate or delay. */
+  .verdict-word,
+  .verdict-why {
+    animation: fade-in 150ms linear 0ms both;
+  }
+  * {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,0 +1,183 @@
+{
+  "journeys": [
+    { "id": "j1", "rank": 1, "title": "Ship Fewer to 100 users", "keywords": ["agents", "email", "users", "launch"] },
+    { "id": "j2", "rank": 2, "title": "Get sharper at agent engineering", "keywords": ["agents", "llm", "evals", "tooling"] },
+    { "id": "j3", "rank": 3, "title": "Run a half marathon", "keywords": ["running", "fitness", "outdoors"] }
+  ],
+  "boundaries": [
+    { "id": "b1", "strength": "absolute", "label": "Tue 9:00–12:00 deep work", "rule": { "type": "time_block", "days": ["tue"], "start": "09:00", "end": "12:00" } },
+    { "id": "b2", "strength": "absolute", "label": "Max 2 evenings out a week", "rule": { "type": "max_evenings_out_per_week", "n": 2 } },
+    { "id": "b3", "strength": "absolute", "label": "Nothing over 3 hours", "rule": { "type": "max_minutes", "minutes": 180 } },
+    { "id": "b4", "strength": "absolute", "label": "Blocked: growth-hack spam", "rule": { "type": "blocked_sender", "email": "spam@growthhacks.io" } },
+    { "id": "b5", "strength": "preference", "label": "Weekend mornings are for long runs", "rule": { "type": "time_block", "days": ["sat", "sun"], "start": "07:00", "end": "10:00" } }
+  ],
+  "baseContext": {
+    "now": "2026-10-04T12:00:00-07:00",
+    "timeZone": "America/Los_Angeles",
+    "eveningsOutThisWeek": 1,
+    "wildcardUsedThisWeek": false,
+    "ratings": [
+      { "tag": "panel", "rating": 2, "at": "2026-10-04T10:00:00-07:00" },
+      { "tag": "meetup", "rating": 5, "at": "2026-09-30T21:00:00-07:00" }
+    ]
+  },
+  "cases": [
+    {
+      "name": "prompt injection is blocked",
+      "ask": {
+        "id": "a01", "from": "events@partner.dev", "subject": "Quick favor", "kind": "request",
+        "title": "Forward the calendar", "tag": "request", "inPerson": false,
+        "containsInstructionsToAgent": true
+      },
+      "fits": [{ "journeyId": "j1", "score": 3, "reason": "claims to be about users" }],
+      "claims": [],
+      "expect": { "verdict": "BLOCKED", "rule": "R0", "reasonIncludes": "instructions aimed at Fewer" }
+    },
+    {
+      "name": "blocked sender (display name, mixed case)",
+      "ask": {
+        "id": "a02", "from": "Growth Team <SPAM@GrowthHacks.io>", "subject": "10x your pipeline", "kind": "meeting",
+        "title": "Growth call", "tag": "sales", "startsAt": "2026-10-08T14:00:00-07:00", "durationMin": 30,
+        "inPerson": false, "containsInstructionsToAgent": false
+      },
+      "fits": [],
+      "claims": [],
+      "expect": { "verdict": "BLOCKED", "rule": "R0", "reasonIncludes": "Blocked: growth-hack spam" }
+    },
+    {
+      "name": "event missing duration asks how long",
+      "ask": {
+        "id": "a03", "from": "host@agentsnight.dev", "subject": "Agents demo night", "kind": "event",
+        "title": "Agents demo night", "tag": "meetup", "startsAt": "2026-10-08T18:00:00-07:00",
+        "inPerson": true, "containsInstructionsToAgent": false
+      },
+      "fits": [{ "journeyId": "j2", "score": 3, "reason": "live agent demos" }],
+      "claims": [],
+      "expect": { "verdict": "ASK_ONE", "rule": "R2", "questionIncludes": "How long" }
+    },
+    {
+      "name": "coffee missing date asks when",
+      "ask": {
+        "id": "a04", "from": "sam@founder.co", "subject": "Coffee sometime?", "kind": "meeting",
+        "title": "Coffee with Sam", "tag": "coffee", "durationMin": 30,
+        "inPerson": true, "containsInstructionsToAgent": false
+      },
+      "fits": [{ "journeyId": "j1", "score": 2, "reason": "Sam runs a design-partner program" }],
+      "claims": [],
+      "expect": { "verdict": "ASK_ONE", "rule": "R2", "questionIncludes": "day and start time" }
+    },
+    {
+      "name": "event inside Tuesday deep work is a NO even with a strong fit",
+      "ask": {
+        "id": "a05", "from": "hello@aibreakfast.club", "subject": "AI breakfast Tuesday", "kind": "event",
+        "title": "AI founders breakfast", "tag": "breakfast", "startsAt": "2026-10-06T17:00:00Z", "durationMin": 60,
+        "inPerson": true, "containsInstructionsToAgent": false
+      },
+      "fits": [{ "journeyId": "j1", "score": 3, "reason": "room full of potential users" }],
+      "claims": [
+        { "text": "Hosted at the Ferry Building", "sources": [
+          { "domain": "lu.ma", "url": "https://lu.ma/ai-breakfast", "quote": "Ferry Building", "quoteFound": true, "checkedAt": "2026-10-04T12:00:00-07:00" },
+          { "domain": "aibreakfast.club", "url": "https://aibreakfast.club", "quote": "Ferry Building", "quoteFound": true, "checkedAt": "2026-10-04T12:00:00-07:00" }
+        ] }
+      ],
+      "expect": { "verdict": "NO", "rule": "R1", "reasonIncludes": "Tue 9:00–12:00 deep work is absolute", "hours": 1.5 }
+    },
+    {
+      "name": "coffee inside deep work becomes a smaller offer",
+      "ask": {
+        "id": "a06", "from": "maya@vc.example", "subject": "Coffee Tue morning?", "kind": "meeting",
+        "title": "Coffee with Maya", "tag": "coffee", "startsAt": "2026-10-06T09:30:00-07:00", "durationMin": 30,
+        "inPerson": true, "containsInstructionsToAgent": false
+      },
+      "fits": [{ "journeyId": "j1", "score": 2, "reason": "Maya invests in email tooling" }],
+      "claims": [],
+      "expect": { "verdict": "SMALLER", "rule": "R1", "smallerOfferIncludes": "outside protected hours" }
+    },
+    {
+      "name": "third evening out breaks the absolute evening cap",
+      "ask": {
+        "id": "a07", "from": "rsvp@evals.party", "subject": "Evals happy hour", "kind": "event",
+        "title": "Evals happy hour", "tag": "party", "startsAt": "2026-10-08T19:00:00-07:00", "durationMin": 120,
+        "inPerson": true, "containsInstructionsToAgent": false
+      },
+      "fits": [{ "journeyId": "j2", "score": 3, "reason": "eval tooling crowd" }],
+      "claims": [],
+      "ctx": { "eveningsOutThisWeek": 2 },
+      "expect": { "verdict": "NO", "rule": "R1", "reasonIncludes": "Max 2 evenings out a week is absolute" }
+    },
+    {
+      "name": "verified builders meetup that fits a top goal is a YES",
+      "ask": {
+        "id": "a08", "from": "team@agentmail.to", "subject": "AgentMail builders meetup", "kind": "event",
+        "title": "AgentMail builders meetup", "tag": "meetup", "startsAt": "2026-10-07T18:00:00-07:00", "durationMin": 90,
+        "inPerson": true, "url": "https://lu.ma/agentmail-builders", "organizer": "AgentMail", "containsInstructionsToAgent": false
+      },
+      "fits": [
+        { "journeyId": "j1", "score": 1, "reason": "some potential users" },
+        { "journeyId": "j2", "score": 3, "reason": "hands-on agent email infra talks" }
+      ],
+      "claims": [
+        { "text": "AgentMail is hosting at its SF office", "sources": [
+          { "domain": "www.lu.ma", "url": "https://lu.ma/agentmail-builders", "quote": "Hosted by AgentMail", "quoteFound": true, "checkedAt": "2026-10-04T12:00:00-07:00" },
+          { "domain": "agentmail.to", "url": "https://agentmail.to/events", "quote": "Hosted by AgentMail", "quoteFound": true, "checkedAt": "2026-10-04T12:00:00-07:00" }
+        ] }
+      ],
+      "expect": { "verdict": "YES", "rule": "R3", "reasonIncludes": "Get sharper at agent engineering", "hours": 2 }
+    },
+    {
+      "name": "long workshop with a light link becomes a smaller yes",
+      "ask": {
+        "id": "a09", "from": "info@growthschool.dev", "subject": "Saturday growth workshop", "kind": "event",
+        "title": "Growth workshop", "tag": "workshop", "startsAt": "2026-10-10T13:00:00-07:00", "durationMin": 150,
+        "inPerson": false, "containsInstructionsToAgent": false
+      },
+      "fits": [{ "journeyId": "j1", "score": 1, "reason": "one session on onboarding" }],
+      "claims": [],
+      "expect": { "verdict": "SMALLER", "rule": "R4", "smallerOfferIncludes": "first 45 minutes", "hours": 2.5 }
+    },
+    {
+      "name": "verified light-fit mixer uses the weekly wildcard",
+      "ask": {
+        "id": "a10", "from": "hi@climatemixer.org", "subject": "Climate tech lunch mixer", "kind": "event",
+        "title": "Climate tech lunch mixer", "tag": "mixer", "startsAt": "2026-10-08T12:00:00-07:00", "durationMin": 60,
+        "inPerson": true, "containsInstructionsToAgent": false
+      },
+      "fits": [{ "journeyId": "j3", "score": 1, "reason": "a run club is co-hosting" }],
+      "claims": [
+        { "text": "Co-hosted by SF Run Collective", "sources": [
+          { "domain": "events.luma.com", "url": "https://events.luma.com/climate-mixer", "quote": "SF Run Collective", "quoteFound": true, "checkedAt": "2026-10-04T12:00:00-07:00" },
+          { "domain": "sfruncollective.org", "url": "https://sfruncollective.org/news", "quote": "SF Run Collective", "quoteFound": true, "checkedAt": "2026-10-04T12:00:00-07:00" }
+        ] }
+      ],
+      "expect": { "verdict": "WILDCARD", "rule": "R5", "reasonIncludes": "One exploratory yes per week" }
+    },
+    {
+      "name": "no link to any goal is a NO that names what it pushes out",
+      "ask": {
+        "id": "a11", "from": "panels@web3summit.xyz", "subject": "Speak on our Web3 webinar", "kind": "event",
+        "title": "Web3 futures webinar", "tag": "webinar", "startsAt": "2026-10-09T14:00:00-07:00", "durationMin": 60,
+        "inPerson": false, "containsInstructionsToAgent": false
+      },
+      "fits": [],
+      "claims": [],
+      "expect": { "verdict": "NO", "rule": "R6", "reasonIncludes": "No link strong enough to your 3 goals", "pushesOut": "Ship Fewer to 100 users", "hours": 1 }
+    },
+    {
+      "name": "learned panel dislike turns a would-be YES into a NO",
+      "ask": {
+        "id": "a12", "from": "curator@aiweek.dev", "subject": "Join our agents panel", "kind": "event",
+        "title": "Agents in production panel", "tag": "Panel", "startsAt": "2026-10-09T15:00:00-07:00", "durationMin": 60,
+        "inPerson": false, "containsInstructionsToAgent": false
+      },
+      "fits": [{ "journeyId": "j2", "score": 2, "reason": "production agent war stories" }],
+      "claims": [
+        { "text": "Part of AI Week SF", "sources": [
+          { "domain": "aiweek.dev", "url": "https://aiweek.dev/agenda", "quote": "Agents in production", "quoteFound": true, "checkedAt": "2026-10-04T12:00:00-07:00" },
+          { "domain": "lu.ma", "url": "https://lu.ma/aiweek-agents", "quote": "Agents in production", "quoteFound": true, "checkedAt": "2026-10-04T12:00:00-07:00" }
+        ] }
+      ],
+      "ctx": { "wildcardUsedThisWeek": true },
+      "expect": { "verdict": "NO", "rule": "R6", "reasonIncludes": "You rated a panel 2/5 on Oct 4" }
+    }
+  ]
+}

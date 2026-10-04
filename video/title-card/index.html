@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <title>Fewer title card</title>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      /* Tokens mirror src/app/globals.css (paper / ink / muted / yes-*). */
+      :root {
+        --paper: #f6f4ef;
+        --ink: #1b1f23;
+        --muted: #566070;
+        --line-strong: #cbc4b4;
+        --yes-fg: #0b5a29;
+        --yes-accent: #1e8e4a;
+        --serif: "Instrument Serif", Georgia, "Times New Roman", serif;
+        --sans: "Geist", "Inter", ui-sans-serif, system-ui, sans-serif;
+        --mono: "Geist Mono", "JetBrains Mono", ui-monospace, monospace;
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: var(--paper);
+      }
+      #root {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: var(--paper);
+        font-family: var(--sans);
+      }
+      .bg {
+        position: absolute;
+        inset: 0;
+        background: var(--paper);
+      }
+      .frame {
+        position: absolute;
+        inset: 0;
+        padding: 150px 150px 96px 150px;
+        display: block;
+        transform-origin: 50% 50%;
+      }
+      .headline {
+        position: absolute;
+        left: 150px;
+        top: 214px;
+        width: 1700px;
+        font-family: var(--serif);
+        font-weight: 400;
+        font-size: 176px;
+        line-height: 1.02;
+        letter-spacing: -0.02em;
+        color: var(--ink);
+      }
+      .headline .ln {
+        display: block;
+        white-space: nowrap;
+      }
+      .headline .good {
+        position: relative;
+        display: inline-block;
+        color: var(--yes-fg);
+      }
+      .rule {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: -6px;
+        height: 8px;
+        border-radius: 4px;
+        background: var(--yes-accent);
+        transform-origin: 0% 50%;
+      }
+      .sub {
+        position: absolute;
+        left: 150px;
+        top: 612px;
+        width: 1500px;
+        font-size: 50px;
+        line-height: 1.25;
+        letter-spacing: -0.01em;
+        color: var(--muted);
+        font-weight: 400;
+      }
+      .sub b {
+        color: var(--ink);
+        font-weight: 500;
+      }
+      .dots {
+        position: absolute;
+        left: 150px;
+        top: 806px;
+        height: 44px;
+        display: flex;
+        gap: 30px;
+      }
+      .dot {
+        display: block;
+        width: 44px;
+        height: 44px;
+        border-radius: 22px;
+        background: var(--line-strong);
+      }
+      .foot {
+        position: absolute;
+        left: 150px;
+        right: 150px;
+        bottom: 84px;
+        display: flex;
+        justify-content: space-between;
+        font-family: var(--mono);
+        font-size: 24px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="4"
+      data-width="1920"
+      data-height="1080"
+    >
+      <div class="bg"></div>
+      <section id="card" class="clip frame" data-start="0" data-duration="4" data-track-index="0">
+        <h1 class="headline" id="headline">
+          <span class="ln" id="ln1">Fewer —</span>
+          <span class="ln" id="ln2">fewer yeses, <span class="good" id="good">better ones.<span class="rule" id="rule"></span></span></span>
+        </h1>
+        <p class="sub" id="sub">Most agents help you do more. <b>Fewer helps you do less.</b></p>
+        <div class="dots" id="dots">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        </div>
+        <div class="foot" id="foot">
+          <span>Build Personal Agents Hack · San Francisco</span>
+          <span>Demo persona · demo inboxes</span>
+        </div>
+      </section>
+    </div>
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      // Headline: two lines rise in.
+      tl.from("#ln1", { y: 44, opacity: 0, duration: 0.7, ease: "power3.out" }, 0.1);
+      tl.from("#ln2", { y: 44, opacity: 0, duration: 0.7, ease: "power3.out" }, 0.35);
+      // "better ones." underline draws left to right.
+      tl.from("#rule", { scaleX: 0, duration: 0.55, ease: "power2.inOut" }, 1.0);
+      // Subline.
+      tl.from("#sub", { y: 24, opacity: 0, duration: 0.6, ease: "power3.out" }, 1.0);
+
+      // Dots: twelve candidates pop in, then ten step back and two stay.
+      const dots = gsap.utils.toArray("#dots .dot");
+      tl.from(dots, { scale: 0, opacity: 0, duration: 0.35, stagger: 0.045, ease: "back.out(2)" }, 0.5);
+      const keep = [3, 8];
+      dots.forEach((d, i) => {
+        if (keep.includes(i)) {
+          tl.to(d, { backgroundColor: "#1e8e4a", scale: 1.3, duration: 0.45, ease: "power2.out" }, 2.0);
+        } else {
+          tl.to(d, { opacity: 0.3, scale: 0.55, duration: 0.45, ease: "power2.inOut" }, 1.9 + i * 0.02);
+        }
+      });
+
+      // Slow push for life; ends on a settled frame.
+      tl.to("#card", { scale: 1.012, duration: 3.9, ease: "none" }, 0);
+
+      window.__timelines["main"] = tl;
+      tl.seek(0);
+    </script>
+  </body>
+</html>

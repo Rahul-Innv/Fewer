@@ -1,0 +1,48 @@
+1
+00:00:00,300 --> 00:00:02,100
+Most agents help you do more.
+
+2
+00:00:02,100 --> 00:00:04,000
+Fewer helps you do less.
+
+3
+00:00:04,100 --> 00:00:05,000
+On purpose.
+
+4
+00:00:05,100 --> 00:00:07,200
+Four asks just hit its inbox:
+
+5
+00:00:07,200 --> 00:00:10,900
+an invite, a coffee, a panel,
+and a hijack attempt.
+
+6
+00:00:11,400 --> 00:00:14,800
+It weighs each one against
+my three goals,
+
+7
+00:00:14,900 --> 00:00:16,400
+checks who's asking,
+
+8
+00:00:16,400 --> 00:00:18,100
+and plain rules decide:
+
+9
+00:00:18,100 --> 00:00:20,800
+yes, smaller, ask one question,
+or blocked.
+
+10
+00:00:21,000 --> 00:00:24,600
+Then it sends me one brief,
+with a single-use code.
+
+11
+00:00:24,900 --> 00:00:29,500
+I reply YES and the replies
+go out, exactly once.

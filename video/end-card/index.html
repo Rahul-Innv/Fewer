@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <title>Fewer end card</title>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      /* Tokens mirror src/app/globals.css; end card inverts paper/ink. */
+      :root {
+        --paper: #f6f4ef;
+        --ink: #1b1f23;
+        --on-ink-muted: #c9ced6;
+        --yes-on-ink: #6fd392;
+        --serif: "Instrument Serif", Georgia, "Times New Roman", serif;
+        --sans: "Geist", "Inter", ui-sans-serif, system-ui, sans-serif;
+        --mono: "Geist Mono", "JetBrains Mono", ui-monospace, monospace;
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: var(--ink);
+      }
+      #root {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: var(--ink);
+        font-family: var(--sans);
+      }
+      .bg {
+        position: absolute;
+        inset: 0;
+        background: var(--ink);
+      }
+      .frame {
+        position: absolute;
+        inset: 0;
+        transform-origin: 50% 50%;
+      }
+      .word {
+        position: absolute;
+        left: 150px;
+        top: 130px;
+        font-family: var(--serif);
+        font-size: 200px;
+        line-height: 1;
+        letter-spacing: -0.02em;
+        color: var(--paper);
+      }
+      .tag {
+        position: absolute;
+        left: 154px;
+        top: 372px;
+        font-size: 46px;
+        line-height: 1.2;
+        color: var(--on-ink-muted);
+        letter-spacing: -0.01em;
+      }
+      .tag b {
+        font-weight: 500;
+        color: var(--yes-on-ink);
+      }
+      .url {
+        position: absolute;
+        left: 150px;
+        top: 506px;
+        font-family: var(--mono);
+        font-size: 76px;
+        line-height: 1.1;
+        letter-spacing: -0.02em;
+        color: var(--paper);
+      }
+      .urlrule {
+        position: absolute;
+        left: 150px;
+        top: 612px;
+        width: 1198px;
+        height: 6px;
+        border-radius: 3px;
+        background: var(--yes-on-ink);
+        transform-origin: 0% 50%;
+      }
+      .built {
+        position: absolute;
+        left: 154px;
+        top: 692px;
+        font-family: var(--mono);
+        font-size: 24px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--on-ink-muted);
+      }
+      .sponsors {
+        position: absolute;
+        left: 150px;
+        top: 742px;
+        display: flex;
+        align-items: center;
+        gap: 0;
+        font-size: 58px;
+        line-height: 1.1;
+        letter-spacing: -0.015em;
+        color: var(--paper);
+      }
+      .sponsors .sp {
+        display: block;
+        padding: 0 40px;
+        border-left: 2px solid rgba(246, 244, 239, 0.28);
+      }
+      .sponsors .sp:first-child {
+        padding-left: 4px;
+        border-left: 0;
+      }
+      .foot {
+        position: absolute;
+        left: 154px;
+        right: 150px;
+        bottom: 84px;
+        font-family: var(--mono);
+        font-size: 24px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--on-ink-muted);
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="5"
+      data-width="1920"
+      data-height="1080"
+    >
+      <div class="bg"></div>
+      <section id="card" class="clip frame" data-start="0" data-duration="5" data-track-index="0">
+        <div class="word" id="word">Fewer</div>
+        <p class="tag" id="tag">Fewer yeses, <b>better ones.</b></p>
+        <div class="url" id="url">github.com/Rahul-Innv/Fewer</div>
+        <div class="urlrule" id="urlrule"></div>
+        <div class="built" id="built">Built with</div>
+        <div class="sponsors" id="sponsors">
+          <span class="sp">Neon</span>
+          <span class="sp">Mastra</span>
+          <span class="sp">AgentMail</span>
+          <span class="sp">Exa</span>
+          <span class="sp">assistant-ui</span>
+        </div>
+        <div class="foot" id="foot">Built today · Demo persona and demo inboxes · Nothing real was booked</div>
+      </section>
+    </div>
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      tl.from("#word", { y: 40, opacity: 0, duration: 0.7, ease: "power3.out" }, 0.1);
+      tl.from("#tag", { y: 24, opacity: 0, duration: 0.6, ease: "power3.out" }, 0.4);
+      tl.from("#url", { y: 24, opacity: 0, duration: 0.6, ease: "power3.out" }, 0.7);
+      tl.from("#urlrule", { scaleX: 0, duration: 0.6, ease: "power2.inOut" }, 1.0);
+      tl.from("#built", { opacity: 0, duration: 0.4, ease: "power2.out" }, 1.4);
+      tl.from(".sponsors .sp", { y: 20, opacity: 0, duration: 0.45, stagger: 0.15, ease: "power3.out" }, 1.5);
+      tl.from("#foot", { opacity: 0, duration: 0.5, ease: "power2.out" }, 2.4);
+      tl.to("#card", { scale: 1.01, duration: 4.9, ease: "none" }, 0);
+
+      window.__timelines["main"] = tl;
+      tl.seek(0);
+    </script>
+  </body>
+</html>
