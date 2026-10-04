@@ -1,0 +1,12 @@
+import { loadPlaywright, chromiumPath, sleep } from "./pw.mjs";
+const { chromium } = loadPlaywright();
+const b = await chromium.launch({ headless: true, executablePath: chromiumPath() });
+const p = await (await b.newContext({ viewport: { width: 1280, height: 720 } })).newPage();
+await p.goto("http://localhost:3000", { waitUntil: "load", timeout: 60000 });
+await p.getByRole("radio", { name: /^Before/ }).first().waitFor({ timeout: 60000 }).catch(() => console.log("no Before radio"));
+await sleep(1500);
+const err = await p.evaluate(() => { const n = document.querySelector("nextjs-portal"); const sr = n && n.shadowRoot; const t = sr ? sr.textContent : ""; return /Unhandled|Runtime Error|Build Error|Failed to compile|Console Error/i.test(t) ? t.slice(0, 300) : null; });
+console.log("overlay:", err);
+console.log((await p.locator("body").ariaSnapshot()).split("\n").slice(0, 30).join("\n"));
+await p.screenshot({ path: "../out/precheck.png" });
+await b.close();

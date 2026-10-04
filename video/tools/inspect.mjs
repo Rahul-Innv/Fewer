@@ -1,0 +1,11 @@
+import { loadPlaywright, chromiumPath, sleep } from "./pw.mjs";
+const { chromium } = loadPlaywright();
+const b = await chromium.launch({ headless: true, executablePath: chromiumPath() });
+const p = await (await b.newContext({ viewport: { width: 1280, height: 720 } })).newPage();
+await p.goto("http://localhost:3000", { waitUntil: "load", timeout: 60000 });
+await sleep(6000);
+await p.screenshot({ path: "../out/inspect-top.png" });
+await p.screenshot({ path: "../out/inspect-full.png", fullPage: true });
+const snap = await p.locator("body").ariaSnapshot();
+console.log(snap.slice(0, 20000));
+await b.close();
