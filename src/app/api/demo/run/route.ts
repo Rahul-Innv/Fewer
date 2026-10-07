@@ -9,7 +9,7 @@ export const runtime = "nodejs";
  *   Clears demo rows only (live data untouched). The demo asks then ARRIVE one every 3 s, each triaged
  *   as it lands (real model + Exa + rules); then one Desk-only approval. NO email to the senders.
  *   409 { ok: false, error, lastRunAt } within 60 s of the last run; 412 on a non-demo database.
- * GET /api/demo/run -> { ok: true, lastRunAt, inserted, total } for "2 of 5 asks arrived".
+ * GET /api/demo/run -> { ok: true, lastRunAt, inserted, total, running } for "2 of 5 asks arrived".
  * On Fly this sits behind the DESK_PASSWORD gate like every other route.
  */
 export async function POST(req: Request) {

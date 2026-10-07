@@ -63,6 +63,14 @@ export type DemoStart =
 
 let starting = false;
 const STAGGER_MS = 3_000;
+/** When the current run started (ms), or null when idle. Expires so a run that died can't block the buttons. */
+let runningSince: number | null = null;
+const RUN_EXPIRES_MS = 5 * 60_000;
+
+function demoRunning(): boolean {
+  if (runningSince !== null && Date.now() - runningSince > RUN_EXPIRES_MS) runningSince = null;
+  return runningSince !== null;
+}
 
 function guardDemoDb(): { ok: false; status: 412; error: string } | null {
   return /euzena/i.test(directDatabaseUrl() ?? "")
@@ -89,7 +97,7 @@ export async function resetDemo(): Promise<{ ok: true } | { ok: false; status: 4
 export async function startDemoRun(now = new Date()): Promise<DemoStart> {
   const refused = guardDemoDb();
   if (refused) return refused;
-  if (starting) return { ok: false, status: 409, error: "A demo run is already starting." };
+  if (starting || demoRunning()) return { ok: false, status: 409, error: "A demo run is already going." };
   starting = true;
   try {
     const last = await lastDemoRunAt();
@@ -100,6 +108,7 @@ export async function startDemoRun(now = new Date()): Promise<DemoStart> {
     const startedAt = now.toISOString();
     const total = demoAsks().length;
     await logEvent("demo_run", null, { startedAt, total });
+    runningSince = Date.now();
     return { ok: true, startedAt, total };
   } finally {
     starting = false;
@@ -111,23 +120,31 @@ export async function startDemoRun(now = new Date()): Promise<DemoStart> {
  * so the Desk shows them arriving and being decided. Then one Desk-only approval, no email.
  */
 export async function runDemoStaggered(): Promise<void> {
-  const { submitDemoAsk, triage, sendBrief } = await import("./pipeline");
-  const asks = demoAsks();
-  const askIds: string[] = [];
-  const triages: Promise<void>[] = [];
-  for (const [i, ask] of asks.entries()) {
-    if (i > 0) await new Promise((r) => setTimeout(r, STAGGER_MS));
-    const sender = SENDERS[i] ?? SENDERS[0]!;
-    const id = await submitDemoAsk({ subject: ask.subject, text: ask.text, ...sender });
-    askIds.push(id);
-    triages.push(triage(id).catch((e) => console.error("[fewer/demo] triage failed", id, e)));
+  runningSince ??= Date.now();
+  try {
+    const { submitDemoAsk, triage, sendBrief } = await import("./pipeline");
+    const asks = demoAsks();
+    const askIds: string[] = [];
+    const triages: Promise<void>[] = [];
+    for (const [i, ask] of asks.entries()) {
+      if (i > 0) await new Promise((r) => setTimeout(r, STAGGER_MS));
+      const sender = SENDERS[i] ?? SENDERS[0]!;
+      const id = await submitDemoAsk({ subject: ask.subject, text: ask.text, ...sender });
+      askIds.push(id);
+      triages.push(triage(id).catch((e) => console.error("[fewer/demo] triage failed", id, e)));
+    }
+    await Promise.all(triages);
+    await sendBrief(askIds);
+  } finally {
+    runningSince = null;
   }
-  await Promise.all(triages);
-  await sendBrief(askIds);
 }
 
-/** For "2 of 5 asks arrived": demo asks present now vs the planned total. */
-export async function demoProgress(): Promise<{ inserted: number; total: number }> {
+/**
+ * For "2 of 5 asks arrived": demo asks present now vs the planned total, and whether a run is going.
+ * `running` is authoritative: 0 of 5 with no run going is an empty demo, not a stuck one.
+ */
+export async function demoProgress(): Promise<{ inserted: number; total: number; running: boolean }> {
   const [r] = await sql<{ n: number }[]>`select count(*)::int as n from asks where inbox_message_id like 'demo-%'`;
-  return { inserted: r?.n ?? 0, total: demoAsks().length };
+  return { inserted: r?.n ?? 0, total: demoAsks().length, running: demoRunning() };
 }
