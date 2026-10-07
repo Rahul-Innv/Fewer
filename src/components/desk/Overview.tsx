@@ -24,14 +24,16 @@ export function DemoBadge() {
 }
 
 type RunState = { kind: "idle" } | { kind: "busy" } | { kind: "hint" } | { kind: "note"; text: string; problem: boolean };
-type RunProgress = { inserted: number; total: number };
+type RunProgress = { inserted: number; total: number; running: boolean };
 
 async function readDemoProgress(): Promise<RunProgress | null> {
   try {
     const res = await fetch("/api/demo/run", { cache: "no-store" });
     if (!res.ok) return null;
-    const d = (await res.json().catch(() => ({}))) as { inserted?: unknown; total?: unknown };
-    return typeof d.inserted === "number" && typeof d.total === "number" && d.total > 0 ? { inserted: d.inserted, total: d.total } : null;
+    const d = (await res.json().catch(() => ({}))) as { inserted?: unknown; total?: unknown; running?: unknown };
+    if (typeof d.inserted !== "number" || typeof d.total !== "number" || d.total <= 0) return null;
+    // Only the server knows whether a run is going: 0 of 5 with no run is an empty demo, not a stuck one.
+    return { inserted: d.inserted, total: d.total, running: d.running === true };
   } catch {
     return null;
   }
@@ -47,7 +49,7 @@ export function RunDemoButton({ onRan }: { onRan: () => void }) {
   const [progress, setProgress] = useState<RunProgress | null>(null);
   const [runId, setRunId] = useState(0);
   const seen = useRef(-1);
-  const running = progress !== null && progress.inserted < progress.total;
+  const running = progress !== null && progress.running;
 
   // Poll only while a run is in progress (on load this also picks up a run that is already going).
   useEffect(() => {
@@ -56,7 +58,7 @@ export function RunDemoButton({ onRan }: { onRan: () => void }) {
     const tick = async () => {
       const p = await readDemoProgress();
       if (stopped) return;
-      if (p && p.inserted < p.total) {
+      if (p && p.running) {
         setProgress(p);
         if (p.inserted !== seen.current) {
           seen.current = p.inserted;
@@ -104,7 +106,7 @@ export function RunDemoButton({ onRan }: { onRan: () => void }) {
         setState({ kind: "idle" });
         if (total > 0) {
           seen.current = 0;
-          setProgress({ inserted: 0, total });
+          setProgress({ inserted: 0, total, running: true });
         }
         setRunId((n) => n + 1);
         onRan();
@@ -120,7 +122,7 @@ export function RunDemoButton({ onRan }: { onRan: () => void }) {
     <div className="relative flex flex-wrap items-center justify-end gap-3">
       {running && progress ? (
         <span role="status" className="text-[14px] font-medium text-ink tabular-nums">
-          {progress.inserted} of {progress.total} asks arrived
+          {progress.inserted < progress.total ? `${progress.inserted} of ${progress.total} asks arrived` : "All arrived · deciding"}
         </span>
       ) : null}
       <button

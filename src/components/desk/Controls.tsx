@@ -68,8 +68,8 @@ export function ResetDemoButton({ onDone, onToast }: { onDone: () => void; onToa
     const tick = async () => {
       try {
         const res = await fetch("/api/demo/run", { cache: "no-store" });
-        const d = (await res.json().catch(() => ({}))) as { inserted?: unknown; total?: unknown };
-        if (!stopped) setDemoRunning(typeof d.inserted === "number" && typeof d.total === "number" && d.inserted < d.total);
+        const d = (await res.json().catch(() => ({}))) as { running?: unknown };
+        if (!stopped) setDemoRunning(d.running === true);
       } catch {
         /* keep the last known state */
       }
